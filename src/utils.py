@@ -20,7 +20,7 @@ def recv_pdu(sock):
     while bytes_recd < length:
         chunk = sock.recv(min(4096, length - bytes_recd))
         if not chunk:
-            raise ConnectionError('+ utils.py: Socket closed prematurely')
+            raise ConnectionError('[utils.py]: Socket closed prematurely')
         chunks.append(chunk)
         bytes_recd += len(chunk)
 
