@@ -64,6 +64,11 @@ class MTGNPServer:
                     self.broadcast_status()
 
                     # Step 4: Check if GAME_SETUP can proceed
+                    if len(self.players) == 2:
+                        print("[server.py]: Both players are ready. Moving to GAME_SETUP...")
+                        self.phase = "GAME_SETUP"
+                        # Implement section 6.3
+                        break
             except Exception as e:
                 print("[server.py]: Error: ", e)
                 break
