@@ -4,7 +4,7 @@ import utils
 from engine import GameEngine
 
 HOST = socket.gethostbyname(socket.gethostname())
-PORT = 6700
+PORT = 4444
 
 LEGAL_CARDS = {"Mountain", "Forest", "Plains", "Island", "Swamp", "Lightning Bolt", "Shock", 
                "Lava Spike", "Flame Slash", "Searing Spear", "Skullcrack", "Rift Bolt", 

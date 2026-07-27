@@ -4,7 +4,7 @@ import socket
 import utils
 
 HOST = socket.gethostbyname(socket.gethostname())
-PORT = 6700
+PORT = 4444
 
 def start_client(player_id):
     print("[client.py]: Starting", player_id)
