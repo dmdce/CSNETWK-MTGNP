@@ -1,7 +1,7 @@
 import struct
 import sys
 import socket
-import utils
+import protocol
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
@@ -23,11 +23,11 @@ def start_client(player_id):
             "deck_list": []
         }
 
-        utils.send_pdu(client, ready_pdu)
+        protocol.send_pdu(client, ready_pdu)
 
         # Receive PDU
         while True:
-            response = utils.recv_pdu(client)
+            response = protocol.recv_pdu(client)
             if response:
                 print("[client.py]: Received server PDU:", response)
                 print(f"Type: {response['type']}")
