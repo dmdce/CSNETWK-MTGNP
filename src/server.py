@@ -1,6 +1,6 @@
 import socket
 import threading
-import utils
+import protocol
 from engine import GameEngine
 
 HOST = socket.gethostbyname(socket.gethostname())
@@ -48,14 +48,14 @@ class MTGNPServer:
         }
 
         for client, _ in self.clients:
-            utils.send_pdu(client, update)
+            protocol.send_pdu(client, update)
 
     def handle_client(self, conn, addr):
         print("[server.py]: Connected to", addr)
 
         while True:
             try:
-                pdu = utils.recv_pdu(conn)
+                pdu = protocol.recv_pdu(conn)
                 if not pdu:
                     break
                 
@@ -71,20 +71,25 @@ class MTGNPServer:
                             if pid in self.players and self.players[pid]['sock'] != conn:
                                 error = {
                                     "type": "ERROR",
+                                    "seq_num": self.get_next_seq_num(),
                                     "code": "DUPLICATE_ID",
-                                    "message": f"Player ID '{pid}' is already taken."
+                                    "message": f"Player ID '{pid}' is already taken.",
+                                    "rejected_action": pdu
                                 }
-                                utils.send_pdu(conn, error)
+                                protocol.send_pdu(conn, error)
                                 continue
 
                             # Step 1: Validation
-                            if not (1 <= len(deck) <= 50):
+                            invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
+                            if not (1 <= len(deck) <= 50) or invalid_cards:
                                 error = {
                                     "type": "ERROR",
+                                    "seq_num": self.get_next_seq_num(),
                                     "code": "ILLEGAL_DECK",
-                                    "message": "Invalid deck size, 1-50 cards only"
+                                    "message": "Invalid deck size, or contains illegal cards.",
+                                    "rejected_action": pdu
                                 }
-                                utils.send_pdu(conn, error)
+                                protocol.send_pdu(conn, error)
                                 continue
 
                             # Step 2: Registration

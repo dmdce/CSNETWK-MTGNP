@@ -51,6 +51,24 @@ class GameEngine:
         
     def send_personalized_game_state(self, target_player=None):
         seq_num = self.server.get_next_sequence_number()
+        p1, p2 = self.player_ids[0], self.player_ids[1]
+        
+        targets = [target_player] if target_player else self.player_ids
+        
+        for p in targets:
+            opponent = p2 if p == p1 else p1
+            
+            visible_state = {
+                "turn": self.state["turn"],
+                "phase": self.state["phase"],
+                "active_player": self.state["active_player"],
+                "life_totals": copy.deepcopy(self.state["life_totals"]),
+                "hand": copy.deepcopy(self.state["hand"][p]),
+                "hand_counts": {opponent: self.state["hand_counts"][opponent]},
+                "library_counts": {p1: self.state["libraries"][p1], 
+                                   p2: self.state["libraries"][p2]},
+            }
+            
         
         print(f"Broadcasting state to players: {self.state}")
         
