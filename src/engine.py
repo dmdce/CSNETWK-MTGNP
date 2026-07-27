@@ -33,12 +33,12 @@ class GameEngine:
             "active_player": first_player,
             "priority_holder": None,
             "life_totals": {p1: 20, p2: 20},
-            "stacks": [],
+            "stack": [],
             "battlefield": {p1: [], p2: []},
-            "graveyards": {p1: [], p2: []},
+            "graveyard": {p1: [], p2: []},
             "hand": {p1: hand_p1, p2: hand_p2},
             "hand_counts": {p1: 7, p2: 7},
-            "library_counts": {p1: 0, p2: 0},
+            "libraries": {p1: deck_p1, p2: deck_p2},
             "land_played_this_turn": False
         }
         
@@ -65,9 +65,25 @@ class GameEngine:
                 "life_totals": copy.deepcopy(self.state["life_totals"]),
                 "hand": copy.deepcopy(self.state["hand"][p]),
                 "hand_counts": {opponent: self.state["hand_counts"][opponent]},
-                "library_counts": {p1: self.state["libraries"][p1], 
+                "libraries": {p1: self.state["libraries"][p1], 
                                    p2: self.state["libraries"][p2]},
+                "battlefield": copy.deepcopy(self.state["battlefield"]),
+                "graveyard": copy.deepcopy(self.state["graveyard"]),
+                "stack": copy.deepcopy(self.state["stack"])
             }
+            
+            if "priority_holder" in self.state and self.state["priority_holder"] is not None:
+                visible_state["priority_holder"] = self.state["priority_holder"]
+                
+            if "land_played_this_turn" in self.state:
+                visible_state["land_played_this_turn"] = self.state["land_played_this_turn"]
+                
+            pdu = {
+                "type": "GAME_STATE_UPDATE",
+                "seq_num": seq_num,
+                "state": visible_state
+            }
+            self.server.send_pdu(p, pdu)
             
         
         print(f"Broadcasting state to players: {self.state}")
@@ -93,9 +109,64 @@ class GameEngine:
                     self.game_over(loser_id=player_id, reason="CONCEDE")
                 
                     
-    def handle_mulligan(self, player_id, choice):
-        # TODO: Implement mulligan logic here
-        self.send_personalized_game_state()
+    def handle_mulligan(self, player_id, pdu):
+        keep = pdu.get("keep", True)
+        
+        if keep:
+            expected_bottom = self.mulligan_counts[player_id]
+            cards_to_bottom = pdu.get("cards_to_bottom", [])
+            
+            if len(cards_to_bottom) != expected_bottom:
+                self.server.send_pdu(player_id, {
+                    "type": "ERROR",
+                    "seq_num": self.server.get_next_sequence_number(),
+                    "code": "ILLEGAL_ACTION",
+                    "message": f"Expected to bottom {expected_bottom} cards, but got {len(cards_to_bottom)}.",
+                    "rejected_action": pdu
+                })
+                return
+            
+            hand = self.state["hand"][player_id]
+            # Verify that the cards to bottom are actually in the player's hand
+            temp_hand = list(hand)
+        
+            try:
+                for c in cards_to_bottom:
+                    temp_hand.remove(c)
+            except ValueError:
+                self.server.send_to_player(player_id, {
+                    "type": "ERROR",
+                    "seq_num": self.server.get_next_sequence_number(),
+                    "code": "ILLEGAL_ACTION",
+                    "message": f"One or more cards to bottom are not in the player's hand.",
+                    "rejected_action": pdu
+                })
+                return
+        
+            self.state["hand"][player_id] = temp_hand
+            self.state["libraries"][player_id].extend(cards_to_bottom)
+            
+            self.mulligan_choices[player_id] = True
+            
+            if len(self.mulligan_choices) == 2 and all(self.mulligan_choices.values()):
+                self.transition_to_game()
+        else:
+            self.mulligan_counts[player_id] += 1
+            
+            hand = self.state["hand"][player_id]
+            library = self.state["libraries"][player_id]
+            library.extend(hand)
+            random.shuffle(library)
+            
+            self.state["hand"][player_id] = library[:7]
+            self.state["libraries"][player_id] = library[7:]
+            
+            self.send_personalized_game_state(target_player=player_id)
+            
+    def transition_to_game(self):
+        # TODO: Implement transition to game logic here
+        print("cool")
+        
             
     def handle_priority_pass(self, player_id):
         # TODO: Implement priority pass logic here

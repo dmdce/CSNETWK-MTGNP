@@ -123,6 +123,10 @@ class MTGNPServer:
                 return pid
         return None
     
+    def send_to_player(self, player_id, pdu):
+        if player_id in self.players:
+            protocol.send_pdu(self.players[player_id]['sock'], pdu)
+    
     def get_next_seq_num(self):
         self.seq_num += 1
         return self.seq_num
