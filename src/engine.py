@@ -302,6 +302,54 @@ class GameEngine:
 
         return False
     
+    def handle_discard(self, player_id, pdu):
+        seq = pdu.get("seq_num")
+        ap = self.state["active_player"]
+        
+        if self.state["phase"] != "CLEANUP" or player_id != ap:
+            self.send_error(player_id, "ILLEGAL_ACTION", "Can only discard during your cleanup step.", pdu, seq)
+            return
+        
+        card_ids = pdu.get("card_ids", [])
+        hand = self.state["hand"][player_id]
+        
+        temp_hand = list(hand)
+        try:
+            for card in card_ids:
+                temp_hand.remove(card)
+        except ValueError:
+            self.send_error(player_id, "ILLEGAL_ACTION", "Discarded cards not in hand.", pdu, seq)
+            return
+        
+        self.state["hand"][player_id] = temp_hand
+        self.state["graveyard"][player_id].extend(card_ids)
+        
+        if len(self.state["hand"][player_id]) > 7:
+            self.send_personalized_state_update()
+        else:
+            self.send_personalized_state_update()
+            self.end_turn()
+            
+    def end_turn(self):
+        self.state["turn"] += 1
+        
+        ap = self.state["active_player"]
+        nap = self.player_ids[1] if ap == self.player_ids[0] else self.player_ids[0]
+        
+        self.state["active_player"] = nap
+        
+        self.broadcast_phase_transition("CLEANUP", "UNTAP")
+        self.state["phase"] = "UNTAP"
+        
+        self.state["land_played_this_turn"] = False
+        self.send_personalized_state_update()
+        
+        self.broadcast_phase_transition("UNTAP", "UPKEEP")
+        self.state["phase"] = "UPKEEP"
+        self.grant_priority(nap)
+        
+        
+    
     def game_over(self, loser_id, reason):
         if not self.player_ids:
             return
