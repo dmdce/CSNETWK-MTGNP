@@ -1,6 +1,6 @@
 import socket
 import threading
-import protocol
+from protocol import send_pdu, recv_pdu
 from engine import GameEngine
 
 HOST = socket.gethostbyname(socket.gethostname())
@@ -65,7 +65,7 @@ class MTGNPServer:
         for pid, data in self.players.items():
             if data['status'] == 'CONNECTED':
                 try:
-                    protocol.send_pdu(data['sock'], pdu)
+                    send_pdu(data['sock'], pdu)
                 except:
                     pass
 
@@ -100,14 +100,14 @@ class MTGNPServer:
         }
 
         for client, _ in self.clients:
-            protocol.send_pdu(client, update)
+            send_pdu(client, update)
 
     def handle_client(self, conn, addr):
         print("[server.py]: Connected to", addr)
 
         while True:
             try:
-                pdu = protocol.recv_pdu(conn)
+                pdu = recv_pdu(conn)
                 if not pdu:
                     break
                 
@@ -125,7 +125,7 @@ class MTGNPServer:
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
                                 }
-                                protocol.send_pdu(conn, error)
+                                send_pdu(conn, error)
                                 continue
                             
                             if pid in self.players and self.players[pid]['sock'] != conn:
@@ -136,7 +136,7 @@ class MTGNPServer:
                                     "message": f"Player ID '{pid}' is already taken.",
                                     "rejected_action": pdu
                                 }
-                                protocol.send_pdu(conn, error)
+                                send_pdu(conn, error)
                                 continue
 
                             # Step 1: Validation
@@ -149,7 +149,7 @@ class MTGNPServer:
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
                                 }
-                                protocol.send_pdu(conn, error)
+                                send_pdu(conn, error)
                                 continue
 
                             # Step 2: Registration
@@ -192,7 +192,7 @@ class MTGNPServer:
     
     def send_to_player(self, player_id, pdu):
         if player_id in self.players:
-            protocol.send_pdu(self.players[player_id]['sock'], pdu)
+            send_pdu(self.players[player_id]['sock'], pdu)
     
     def get_next_seq_num(self):
         self.seq_num += 1
