@@ -11,11 +11,20 @@ class GameEngine:
         self.mulligan_sequence = {}
         self.priority_sequence = None
         self.consecutive_passes = 0
+        
+    def reset_state(self):
+        self.state = {}
+        self.player_ids = []
+        self.mulligan_choices = {}
+        self.mulligan_counts = {}
+        self.mulligan_sequence = {}
+        self.priority_sequence = None
+        self.consecutive_passes = 0
 
     def start_game_setup(self):
-        self.state = "running"
-        print("Game started.")
+
         self.player_ids = list(self.server.players.keys())
+        
         p1, p2 = self.player_ids[0], self.player_ids[1]
         
     
@@ -45,14 +54,15 @@ class GameEngine:
             "land_played_this_turn": False
         }
         
-        self.mulligan_choices = {}
+        self.mulligan_choices = {p1: False, p2: False}
         self.mulligan_counts = {p1: 0, p2: 0}
+        self.mulligan_sequence = {}
         
-        self.send_personalized_game_state()
+        self.send_personalized_state_update()
         self.server.phase = "MULLIGAN"
         
         
-    def send_personalized_game_state(self, target_player=None):
+    def send_personalized_state_update(self, target_player=None):
         seq_num = self.server.get_next_sequence_number()
         p1, p2 = self.player_ids[0], self.player_ids[1]
         
@@ -87,7 +97,7 @@ class GameEngine:
                 "state": visible_state
             }
             
-            if self.server.phase == "MULLIGAN":
+            if self.state.get("phase") == "MULLIGAN":
                 self.mulligan_sequence[p] = seq_num
                 
             self.server.send_pdu(p, pdu)
@@ -105,13 +115,13 @@ class GameEngine:
             print(f"[engine.py] Received IN_GAME action from player {player_id}: {pdu_type}")
             match pdu_type:
                 case "PRIORITY_PASS":
-                    self.handle_priority_pass(player_id)
+                    self.handle_priority_pass(player_id, pdu)
                 case "CAST_SPELL":
-                    self.handle_cast_spell(player_id)
+                    self.handle_cast_spell(player_id, pdu)
                 case "PLAY_LAND":
-                    self.handle_play_land(player_id)
+                    self.handle_play_land(player_id, pdu)
                 case "DISCARD":
-                    self.handle_discard(player_id)
+                    self.handle_discard(player_id, pdu)
                 case "CONCEDE":
                     self.game_over(loser_id=player_id, reason="CONCEDE")
                 
@@ -126,17 +136,11 @@ class GameEngine:
         keep = pdu.get("keep", True)
         
         if keep:
-            expected_bottom = self.mulligan_counts[player_id]
             cards_to_bottom = pdu.get("cards_to_bottom", [])
+            expected_bottom = self.mulligan_counts[player_id]
             
             if len(cards_to_bottom) != expected_bottom:
-                self.server.send_pdu(player_id, {
-                    "type": "ERROR",
-                    "seq_num": self.server.get_next_sequence_number(),
-                    "code": "ILLEGAL_ACTION",
-                    "message": f"Expected to bottom {expected_bottom} cards, but got {len(cards_to_bottom)}.",
-                    "rejected_action": pdu
-                })
+                self.send_error(player_id, "ILLEGAL_ACTION", f"Expected to bottom {expected_bottom} cards, but got {len(cards_to_bottom)}.", pdu)
                 return
             
             hand = self.state["hand"][player_id]
@@ -144,16 +148,10 @@ class GameEngine:
             temp_hand = list(hand)
         
             try:
-                for c in cards_to_bottom:
-                    temp_hand.remove(c)
+                for card_id in cards_to_bottom:
+                    temp_hand.remove(card_id)
             except ValueError:
-                self.server.send_to_player(player_id, {
-                    "type": "ERROR",
-                    "seq_num": self.server.get_next_sequence_number(),
-                    "code": "ILLEGAL_ACTION",
-                    "message": f"One or more cards to bottom are not in the player's hand.",
-                    "rejected_action": pdu
-                })
+                self.send_error(player_id, "ILLEGAL_ACTION", "One or more cards to bottom are not in the player's hand.", pdu)
                 return
         
             self.state["hand"][player_id] = temp_hand
@@ -166,6 +164,8 @@ class GameEngine:
         else:
             self.mulligan_counts[player_id] += 1
             
+            self.mulligan_choices[player_id] = False
+            
             hand = self.state["hand"][player_id]
             library = self.state["libraries"][player_id]
             library.extend(hand)
@@ -174,39 +174,104 @@ class GameEngine:
             self.state["hand"][player_id] = library[:7]
             self.state["libraries"][player_id] = library[7:]
             
-            self.send_personalized_game_state(target_player=player_id)
+            self.send_personalized_state_update(target_player=player_id)
             
     def transition_to_game(self):
-        # TODO: Implement transition to game logic here
-        print("cool")
+        if not all(self.mulligan_choices.values()):
+            return
+        
+        self.state["phase"] = "IN_GAME"
+        self.state["turn"] = 1
+        
+        self.broadcast_phase_transition("MULLIGAN", "UNTAP")
+        
+        self.state["phase"] = "UNTAP"
+        self.state["land_played_this_turn"] = False
+        
+        self.send_personalized_state_update()
+        
+        self.broadcast_phase_transition("UNTAP", "UPKEEP")
+        self.state["phase"] = "UPKEEP"
+        
+        self.grant_priority(self.state["active_player"])
+        
+    def broadcast_phase_transition(self, from_phase, to_phase):
+        self.server.broadcast({
+            "type": "PHASE_TRANSITION",
+            "seq_num": self.server.get_next_sequence_number(),
+            "from_phase": from_phase,
+            "to_phase": to_phase,
+            "active_player": self.state["active_player"],
+            "turn": self.state["turn"]
+        })
         
             
-    def handle_priority_pass(self, player_id):
-        # TODO: Implement priority pass logic here
-        self.send_personalized_game_state()
+    def handle_priority_pass(self, player_id, pdu):
+        seq = pdu.get("seq_num")
+        
+        if self.state.get("priority_holder") != player_id:
+            self.send_error(player_id, "NOT_YOUR_PRIORITY", "You do not currently hold priority.", pdu, seq)
+            return
+        
+        if seq != self.priority_sequence:
+            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {self.priority_sequence}, but got {seq}.", pdu)
+            self.regrant_priority(player_id)
+            return
+        
+        self.consecutive_passes += 1
+        
+        if self.consecutive_passes >= 2:
+            self.consecutive_passes = 0
+            if self.state["stack"]:
+                self.resolve_top_stack()
+                
+    def resolve_top_stack(self):
+        item = self.state["stack"].pop(-1)
+        
+        self.server.broadcast({
+            "type": "STACK_RESOLVE",
+            "seq_num": self.server.get_next_sequence_number(),
+            "stack_item_id": item["stack_item_id"],
+            "result": "RESOLVED",
+            "state_changes": []
+        })
+        # TODO: Implement the actual resolution logic for the stack item here
+        
             
-    def handle_cast_spell(self, player_id):
+    def handle_cast_spell(self, player_id, pdu):
         # TODO: Implement spell casting logic here
-        self.send_personalized_game_state()
+        self.send_personalized_state_update()
     
-    def handle_play_land(self, player_id):
+    def handle_play_land(self, player_id, pdu):
         # TODO: Implement land playing logic here
-        self.send_personalized_game_state()
+        self.send_personalized_state_update()
     
-    def handle_discard(self, player_id):
+    def handle_discard(self, player_id, pdu):
         # TODO: Implement discard logic here
-        self.send_personalized_game_state()
+        self.send_personalized_state_update()
+        
+    def grant_priority(self, player_id):
+        if self.check_state_based_actions():
+            return
+        
+        self.state["priority_holder"] = player_id
+        seq_num = self.server.get_next_sequence_number()
+        self.priority_sequence = seq_num
+        self.server.send_to_player(player_id, {
+            "type": "PRIORITY_GRANT",
+            "player_id": player_id,
+            "seq_num": seq_num,
+            "time_limit_ms": 60000
+        })
         
     def send_error(self, player_id, code, message, pdu, seq=None):
-        if seq is None:
-            seq = self.server.get_next_sequence_number()
-        error = {
+        self.server.send_to_player(player_id, {
             "type": "ERROR",
-            "seq_num": self.server.get_next_sequence_number(),
+            "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
             "code": code,
             "message": message,
             "rejected_action": pdu
-        }
+        })
     
     def regrant_priority(self, player_id):
         if self.state.get["priority_holder"] == player_id and self.priority_sequence is not None:
@@ -217,10 +282,29 @@ class GameEngine:
                 "time_limit_ms": 60000
             })
                 
+    def check_state_based_actions(self):
+        if self.server.phase != "IN_GAME":
+            return False
+        p1, p2 = self.player_ids[0], self.player_ids[1]
+        life_p1 = self.state["life_totals"][p1]
+        life_p2 = self.state["life_totals"][p2]
+        
+        if life_p1 <= 0 and life_p2 <= 0:
+            ap = self.state["active_player"]
+            self.game_over(loser_id=ap, reason="LIFE_ZERO")
+            return True
+        elif life_p1 <= 0:
+            self.game_over(loser_id=p1, reason="LIFE_ZERO")
+            return True
+        elif life_p2 <= 0:
+            self.game_over(loser_id=p2, reason="LIFE_ZERO")
+            return True
+
+        return False
     
     def game_over(self, loser_id, reason):
         # TODO: Implement game over logic here
-        self.send_personalized_game_state()
+        self.send_personalized_state_update()
 
     def stop(self):
         self.state = "stopped"
