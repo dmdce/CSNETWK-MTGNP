@@ -8,6 +8,9 @@ class GameEngine:
         self.player_ids = []
         self.mulligan_choices = {}
         self.mulligan_counts = {}
+        self.mulligan_sequence = {}
+        self.priority_sequence = None
+        self.consecutive_passes = 0
 
     def start_game_setup(self):
         self.state = "running"
@@ -28,17 +31,17 @@ class GameEngine:
         first_player = random.choice([p1, p2])
         
         self.state = {
-            turn: 0,
+            "turn": 0,
             "phase": "MULLIGAN",
             "active_player": first_player,
             "priority_holder": None,
             "life_totals": {p1: 20, p2: 20},
-            "stack": [],
+            "hand": {p1: hand_p1, p2: hand_p2},
+            "libraries": {p1: deck_p1, p2: deck_p2},
             "battlefield": {p1: [], p2: []},
             "graveyard": {p1: [], p2: []},
-            "hand": {p1: hand_p1, p2: hand_p2},
             "hand_counts": {p1: 7, p2: 7},
-            "libraries": {p1: deck_p1, p2: deck_p2},
+            "stack": [],
             "land_played_this_turn": False
         }
         
@@ -65,8 +68,8 @@ class GameEngine:
                 "life_totals": copy.deepcopy(self.state["life_totals"]),
                 "hand": copy.deepcopy(self.state["hand"][p]),
                 "hand_counts": {opponent: self.state["hand_counts"][opponent]},
-                "libraries": {p1: self.state["libraries"][p1], 
-                                   p2: self.state["libraries"][p2]},
+                "library_counts": {p1: len(self.state["libraries"][p1]), 
+                              p2: len(self.state["libraries"][p2])},
                 "battlefield": copy.deepcopy(self.state["battlefield"]),
                 "graveyard": copy.deepcopy(self.state["graveyard"]),
                 "stack": copy.deepcopy(self.state["stack"])
@@ -83,6 +86,10 @@ class GameEngine:
                 "seq_num": seq_num,
                 "state": visible_state
             }
+            
+            if self.server.phase == "MULLIGAN":
+                self.mulligan_sequence[p] = seq_num
+                
             self.server.send_pdu(p, pdu)
             
         
@@ -110,6 +117,12 @@ class GameEngine:
                 
                     
     def handle_mulligan(self, player_id, pdu):
+        seq = pdu.get("seq_num")
+        expected_seq = self.mulligan_sequence.get(player_id)
+        if expected_seq is not None and seq != expected_seq:
+            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
+            return
+        
         keep = pdu.get("keep", True)
         
         if keep:
@@ -183,6 +196,27 @@ class GameEngine:
     def handle_discard(self, player_id):
         # TODO: Implement discard logic here
         self.send_personalized_game_state()
+        
+    def send_error(self, player_id, code, message, pdu, seq=None):
+        if seq is None:
+            seq = self.server.get_next_sequence_number()
+        error = {
+            "type": "ERROR",
+            "seq_num": self.server.get_next_sequence_number(),
+            "code": code,
+            "message": message,
+            "rejected_action": pdu
+        }
+    
+    def regrant_priority(self, player_id):
+        if self.state.get["priority_holder"] == player_id and self.priority_sequence is not None:
+            self.server.send_to_player(player_id, {
+                "type": "PRIORITY_GRANT",
+                "player_id": player_id,
+                "seq_num": self.priority_sequence,
+                "time_limit_ms": 60000
+            })
+                
     
     def game_over(self, loser_id, reason):
         # TODO: Implement game over logic here

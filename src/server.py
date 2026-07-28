@@ -118,7 +118,15 @@ class MTGNPServer:
                             deck = pdu.get('deck_list', [])
                             
                             if not pid:
-                                continue  # Ignore if player_id is not provided
+                                error = {
+                                    "type": "ERROR",
+                                    "seq_num": self.get_next_seq_num(),
+                                    "code": "ILLEGAL_ACTION",
+                                    "message": "player_id must be a non-empty string.",
+                                    "rejected_action": pdu
+                                }
+                                protocol.send_pdu(conn, error)
+                                continue
                             
                             if pid in self.players and self.players[pid]['sock'] != conn:
                                 error = {
@@ -165,6 +173,13 @@ class MTGNPServer:
             except Exception as e:
                 print("[server.py]: Error: ", e)
                 break
+        
+        with self.lock:
+            if self.phase not in ["LOBBY", "GAME_OVER"]:
+                pid = self.get_player_id_by_socket(conn)
+                if pid:
+                    print(f"[server.py]: Player {pid} disconnected during game.")
+                    self.engine.game_over(loser_id=pid, reason="DISCONNECT")
 
         print("[server.py]: Closing connection")
         conn.close()
