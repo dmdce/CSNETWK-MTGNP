@@ -108,33 +108,8 @@ class MTGNPServer:
     def on_reconnect_timeout(self, player_id):
         if self.players[player_id]['status'] == 'DISCONNECTED':
             print(f"[server] FAILURE: {player_id} failed to reconnect. Ending game.")
-            self.broadcast_game_over(loser_id = player_id, reason = "DISCONNECT")
-
-    def broadcast_game_over(self, loser_id, reason):
-        self.game_active = False
-        # Determine winner (one who didn't disconnect)
-        winner_id = next(pid for pid in self.players if pid != loser_id)
-
-        pdu = {
-            "type": "GAME_OVER",
-            "seq_num": 999,
-            "winner_id": winner_id,
-            "loser_id": loser_id,
-            "reason": reason
-        }
-
-        for pid, data in self.players.items():
-            if data['status'] == 'CONNECTED':
-                try:
-                    send_pdu(data['sock'], pdu)
-                except:
-                    pass
-
-        print("[server] Resetting server state to LOBBY phase...")
-        self.phase = "LOBBY"
-        self.players = {}
-        self.seq_num = 0
-        self.broadcast_lobby_status()
+            with self.lock:
+                self.engine.game_over(loser_id=player_id, reason="DISCONNECT")
 
     def handle_client_reconnect(self, new_sock, player_id):
         if player_id in self.players and self.players[player_id]['status'] == 'DISCONNECTED':
@@ -156,7 +131,7 @@ class MTGNPServer:
 
         update = {
             "type": "GAME_STATE_UPDATE",
-            "seq_num": self.get_next_seq_num(),
+            "seq_num": self.get_next_sequence_num(),
             "state": {
                 "phase": "LOBBY",
                 "players_ready": count_ready,
@@ -208,7 +183,7 @@ class MTGNPServer:
                                 if existing_player.get('status') == 'CONNECTED':
                                     error = {
                                         "type": "ERROR",
-                                        "seq_num": self.get_next_seq_num(),
+                                        "seq_num": self.get_next_sequence_num(),
                                         "code": "DUPLICATE_ID",
                                         "message": f"Player ID '{new_pid}' is already taken.",
                                         "rejected_action": pdu
@@ -225,7 +200,7 @@ class MTGNPServer:
                             if not new_pid:
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_seq_num(),
+                                    "seq_num": self.get_next_sequence_num(),
                                     "code": "ILLEGAL_ACTION",
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
@@ -237,7 +212,7 @@ class MTGNPServer:
                             if not (1 <= len(deck) <= 50) or invalid_cards:
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_seq_num(),
+                                    "seq_num": self.get_next_sequence_num(),
                                     "code": "ILLEGAL_DECK",
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
@@ -261,21 +236,6 @@ class MTGNPServer:
                             # Step 4: Check if GAME_SETUP can proceed
                             if len(self.players) == 2:
                                 print("[server]: Both players are ready. Moving to GAME_SETUP...")
-                                self.phase = "GAME_SETUP"
-                                self.engine.start_game_setup()
-
-
-                            pid = new_pid
-                            deck = pdu.get('deck_list', [])
-                            self.players[pid] = {
-                                "deck": deck,
-                                "sock": conn,
-                                "status": "CONNECTED",
-                                "timer": None
-                            }
-                            self.broadcast_lobby_status()
-
-                            if len(self.players) == 2:
                                 self.phase = "GAME_SETUP"
                                 self.engine.start_game_setup()
                     elif self.phase == "GAME_OVER":
@@ -313,7 +273,7 @@ class MTGNPServer:
         if player_id in self.players:
             send_pdu(self.players[player_id]['sock'], pdu)
     
-    def get_next_seq_num(self):
+    def get_next_sequence_num(self):
         self.seq_num += 1
         return self.seq_num
 
