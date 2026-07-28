@@ -22,10 +22,11 @@ LEGAL_CARDS = {"Mountain", "Forest", "Plains", "Island", "Swamp", "Lightning Bol
 
 class MTGNPServer:
     def __init__(self):
-        self.HOST = HOST
-        self.PORT = PORT
+        self.host = HOST
+        self.port = PORT
         self.clients = []
         self.players = {}
+        self.max_players = 2
         self.seq_num = 0
         self.phase = "LOBBY"
         self.game_active = True
@@ -206,18 +207,34 @@ class MTGNPServer:
 
     def start(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind((self.HOST, self.PORT))
-        server.listen(2)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((self.host, self.port))
+        server.listen(5) # Backlog
 
-        print(f"[server.py]: Listening on {self.HOST}:{self.PORT}. ~LOBBY Phase~")
-
-        while len(self.clients) < 2:
-            conn, addr = server.accept()
-            self.clients.append((conn, addr))
-            threading.Thread(target=self.handle_client, args=(conn, addr)).start()
+        print(f"[server]: Listening on {self.host}:{self.port}...")
 
         while True:
-            pass
+            conn, addr = server.accept()
+
+            # Count players who are currently 'CONNECTED'
+            active_players = [player for player in self.players.values() if player['status'] == 'CONNECTED']
+
+            if len(active_players) >= self.max_players:
+                print(f"[server] ERROR: Connection attempt from {addr} refused: Game is full.")
+                try:
+                    error_pdu = {
+                        "type": "ERROR",
+                        "code": "ROOM_FULL",
+                        "message": "Two players are already connected. Please try again later."
+                    }
+                    send_pdu(conn, error_pdu)
+                    conn.close()
+                except:
+                    pass
+                continue
+
+            # If room is available, handle client
+            threading.Thread(target=self.handle_client, args=(conn, addr), daemon=True).start()
 
 if __name__ == "__main__":
     server = MTGNPServer()
