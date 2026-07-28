@@ -15,6 +15,8 @@ class MTGNPCLient:
         self.port = PORT
         self.sock = None
         self.seq_num = 0
+        self.last_ping_seq = -1
+        self.pong_timer = None
         self.is_running = True
         self.deck = ["mountain_001", "shock_001", "goblin_guide_001"] # Temporary
 
@@ -27,13 +29,31 @@ class MTGNPCLient:
             time.sleep(30)
             if self.sock:
                 self.seq_num += 1
+                self.last_ping_seq = self.seq_num
+
                 ping_pdu = {
                     "type": "PING",
                     "seq_num": self.seq_num,
                     "timestamp": time.time()
                 }
-                print(f"[PING] Sending heartbeat (seq: {self.seq_num})")
+
+                self.pong_timer = threading.Timer(10.0, self._on_pong_timeout)
+                self.pong_timer.start()
+
+                print(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
                 self._send_pdu(ping_pdu)
+
+    def _on_pong_timeout(self):
+        print(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
+        print("[client] Closing connection due to no response from server...")
+
+        if self.sock:
+            try:
+                # Force close to trigger reconnection
+                self.sock.shutdown(socket.SHUT_RDWR)
+                self.sock.close()
+            except:
+                pass
 
     def _send_pdu(self, pdu):
         try:
@@ -110,11 +130,19 @@ class MTGNPCLient:
     def handle_pdu(self, pdu):
         p_type = pdu.get("type")
 
-        if pdu.get("type") == "PONG":
-            timestamp = pdu.get("timestamp")
-            seqnum = pdu.get("seq_num")
-            latency = round((time.time() - timestamp) * 1000, 2)
-            print(f"[PONG] Heartbeat acknowledged. (seq: {seqnum}, latency: {latency} ms)")
+        if p_type == "PONG":
+            # timestamp = pdu.get("timestamp")
+            # seqnum = pdu.get("seq_num")
+            # latency = round((time.time() - timestamp) * 1000, 2)
+            # print(f"[PONG] Heartbeat acknowledged. (seq: {seqnum}, latency: {latency} ms)")
+            if pdu.get("seq_num") == self.last_ping_seq:
+                if self.pong_timer:
+                    self.pong_timer.cancel()
+
+                latency = round((time.time() - pdu.get("timestamp")) * 1000, 2)
+                print(f"[PONG] Received. Latency: {latency}ms, ping timer cancelled")
+            else:
+                print(f"[client] ??? Received stale PONG (expected {self.last_ping_seq}, got {pdu.get('seq_num')})")
 
         elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
