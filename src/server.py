@@ -69,6 +69,12 @@ class MTGNPServer:
                 except:
                     pass
 
+        print("[server] Resetting server state to LOBBY phase...")
+        self.phase = "LOBBY"
+        self.players = {}
+        self.seq_num = 0
+        self.broadcast_lobby_status()
+
     def handle_client_reconnect(self, new_sock, player_id):
         if player_id in self.players and self.players[player_id]['status'] == 'DISCONNECTED':
             print(f"[server] Player {player_id} has reconnected! Cancelling the timeout.")
@@ -83,7 +89,7 @@ class MTGNPServer:
             return True
         return False
 
-    def broadcast_status(self):
+    def broadcast_lobby_status(self):
         count_ready = len(self.players)
         waiting_for = ["player_2"] if count_ready == 1 else []
 

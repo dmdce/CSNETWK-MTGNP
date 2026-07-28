@@ -106,8 +106,9 @@ class MTGNPCLient:
             print(f"\n--- GAME OVER ---")
             print(f"Winner: {pdu.get('winner_id')}")
             print(f"Reason: {pdu.get('reason')}")
-            self.is_running = False
-            self.sock.close()
+
+            print("[client] Returning to lobby. Waiting for next game.")
+            self.seq_num = 0
 
         elif p_type == "PING":
             self._send_pdu({"type": "PONG", "seq_num": pdu.get("seq_num")})
