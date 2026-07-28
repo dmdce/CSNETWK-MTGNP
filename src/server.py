@@ -278,6 +278,8 @@ class MTGNPServer:
                             if len(self.players) == 2:
                                 self.phase = "GAME_SETUP"
                                 self.engine.start_game_setup()
+                    elif self.phase == "GAME_OVER":
+                        continue
                     else:
                         current_pid = self.get_player_id_by_socket(conn)
                         if current_pid:

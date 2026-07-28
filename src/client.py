@@ -157,7 +157,7 @@ class MTGNPCLient:
 
         elif p_type == "GAME_OVER":
             print(f"\n--- GAME OVER ---")
-            print(f"Winner: {pdu.get('winner_id')}")
+            print(f"Winner: {pdu.get('winner_id')} | Loser: {pdu.get('loser_id')}")
             print(f"Reason: {pdu.get('reason')}")
 
             print("[client] Returning to lobby. Waiting for next game.")
