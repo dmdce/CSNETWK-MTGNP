@@ -131,7 +131,7 @@ class MTGNPServer:
 
         update = {
             "type": "GAME_STATE_UPDATE",
-            "seq_num": self.get_next_sequence_num(),
+            "seq_num": self.get_next_sequence_number(),
             "state": {
                 "phase": "LOBBY",
                 "players_ready": count_ready,
@@ -183,7 +183,7 @@ class MTGNPServer:
                                 if existing_player.get('status') == 'CONNECTED':
                                     error = {
                                         "type": "ERROR",
-                                        "seq_num": self.get_next_sequence_num(),
+                                        "seq_num": self.get_next_sequence_number(),
                                         "code": "DUPLICATE_ID",
                                         "message": f"Player ID '{new_pid}' is already taken.",
                                         "rejected_action": pdu
@@ -200,7 +200,7 @@ class MTGNPServer:
                             if not new_pid:
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_num(),
+                                    "seq_num": self.get_next_sequence_number(),
                                     "code": "ILLEGAL_ACTION",
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
@@ -212,7 +212,7 @@ class MTGNPServer:
                             if not (1 <= len(deck) <= 50) or invalid_cards:
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_num(),
+                                    "seq_num": self.get_next_sequence_number(),
                                     "code": "ILLEGAL_DECK",
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
@@ -272,8 +272,16 @@ class MTGNPServer:
     def send_to_player(self, player_id, pdu):
         if player_id in self.players:
             send_pdu(self.players[player_id]['sock'], pdu)
+
+    def broadcast(self, pdu):
+        for pid, info in self.players.items():
+            if info.get('status') == 'CONNECTED':
+                try:
+                    send_pdu(info['sock'], pdu)
+                except Exception:
+                    pass
     
-    def get_next_sequence_num(self):
+    def get_next_sequence_number(self):
         self.seq_num += 1
         return self.seq_num
 

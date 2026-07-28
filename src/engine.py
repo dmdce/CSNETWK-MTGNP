@@ -246,9 +246,9 @@ class GameEngine:
         # TODO: Implement land playing logic here
         self.send_personalized_state_update()
     
-    def handle_discard(self, player_id, pdu):
-        # TODO: Implement discard logic here
-        self.send_personalized_state_update()
+    # def handle_discard(self, player_id, pdu):
+    #     # TODO: Implement discard logic here
+    #     self.send_personalized_state_update()
         
     def grant_priority(self, player_id):
         if self.check_state_based_actions():
