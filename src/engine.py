@@ -303,8 +303,30 @@ class GameEngine:
         return False
     
     def game_over(self, loser_id, reason):
-        # TODO: Implement game over logic here
-        self.send_personalized_state_update()
+        if not self.player_ids:
+            return
+        
+        if reason == "LIFE_ZERO":
+            if self.state.get("life_totals", {}).get(self.state.get("active_player")) is not None and self.state["life_totals"][self.state["active_player"]] <= 0:
+                winner_id = self.player_ids[1] if self.state["active_player"] == self.player_ids[0] else self.player_ids[0]
+            else:
+                winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
+        elif reason == "CONCEDE":
+            winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
+        elif reason == "DISCONNECT":
+            winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
+        else:
+            winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
+            
+        self.server.broadcast({
+            "type": "GAME_OVER",
+            "seq_num": self.server.get_next_sequence_number(),
+            "winner_id": winner_id,
+            "loser_id": loser_id,
+            "reason": reason
+        })
+        self.server.phase = "LOBBY"
+        self.server.reset_lobby_state()
 
     def stop(self):
         self.state = "stopped"

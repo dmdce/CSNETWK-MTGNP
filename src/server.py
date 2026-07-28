@@ -154,11 +154,9 @@ class MTGNPServer:
         count_ready = len(self.players)
         waiting_for = ["player_2"] if count_ready == 1 else []
 
-        self.seq_num += 1
-
         update = {
             "type": "GAME_STATE_UPDATE",
-            "seq_num": self.seq_num,
+            "seq_num": self.get_next_seq_num(),
             "state": {
                 "phase": "LOBBY",
                 "players_ready": count_ready,
@@ -168,6 +166,12 @@ class MTGNPServer:
 
         for client, _ in self.clients:
             send_pdu(client, update)
+            
+    def reset_lobby_state():
+        self.players = {}
+        self.phase = "LOBBY"
+        self.engine.reset_state()
+        self.broadcast_lobby_status()
 
     def handle_client(self, conn, addr):
         print("[server.py]: Connected to", addr)
