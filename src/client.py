@@ -7,6 +7,7 @@ import threading
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
+MAX_PDU_SIZE = 65535
 
 class MTGNPCLient:
     def __init__(self, player_id):
@@ -58,28 +59,47 @@ class MTGNPCLient:
     def _send_pdu(self, pdu):
         try:
             payload = json.dumps(pdu).encode('utf-8')
+
+            if len(payload) > MAX_PDU_SIZE:
+                print(f"[client] Failed to send PDU: payload of {len(payload)} bytes exceeds max PDU size.")
+                return
+
             header = struct.pack('>I', len(payload))
             self.sock.sendall(header + payload)
         except (socket.error, AttributeError):
             print("[client] Failed to send PDU: Socket not connected.")
 
+    def _recv_exact(self, num_bytes):
+        chunks = []
+        bytes_received = 0
+
+        while bytes_received < num_bytes:
+            chunk = self.sock.recv(min(num_bytes - bytes_received, 4096))
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            bytes_received += len(chunk)
+
+        return b"".join(chunks)
+
     def _recv_pdu(self):
         try:
             header = self.sock.recv(4)
 
-            if not header: return None
+            if not header:
+                return None
 
             length = struct.unpack('>I', header)[0]
-            chunks = []
-            bytes_received = 0
 
-            while bytes_received < length:
-                chunk = self.sock.recv(min(length - bytes_received, 4096))
-                if not chunk: break
-                chunks.append(chunk)
-                bytes_received += len(chunk)
+            if length > MAX_PDU_SIZE:
+                print(f"[client] Rejecting incoming PDU: declared length {length} bytes exceeds max size")
+                return None
 
-            return json.loads(b"".join(chunks).decode('utf-8'))
+            body = self._recv_exact(length)
+            if body is None:
+                return None
+
+            return json.loads(body.decode('utf-8'))
         except (socket.error, json.JSONDecodeError):
             return None
 
