@@ -167,28 +167,62 @@ class MTGNPServer:
         for client, _ in self.clients:
             send_pdu(client, update)
             
-    def reset_lobby_state():
+    def reset_lobby_state(self):
         self.players = {}
         self.phase = "LOBBY"
         self.engine.reset_state()
         self.broadcast_lobby_status()
 
     def handle_client(self, conn, addr):
-        print("[server.py]: Connected to", addr)
+        pid = None
+
+        print("[server]: Connected to", addr)
 
         while True:
             try:
                 pdu = recv_pdu(conn)
                 if not pdu:
                     break
+
+                p_type = pdu.get("type")
+
+                if p_type == "PING":
+                    pong_pdu = {
+                        "type": "PONG",
+                        "seq_num": pdu.get("seq_num"),
+                        "timestamp": pdu.get("timestamp")
+                    }
+                    send_pdu(conn, pong_pdu)
+                    continue
                 
                 with self.lock:
                     if self.phase == "LOBBY":
-                        if pdu['type'] == "PLAYER_READY":
-                            pid = pdu.get('player_id')
+                        if p_type == "PLAYER_READY":
+                            new_pid = pdu.get('player_id')
                             deck = pdu.get('deck_list', [])
-                            
-                            if not pid:
+
+                            # Check if pid is RECONNECT or DUPLICATE
+                            if new_pid in self.players:
+                                existing_player = self.players[new_pid]
+
+                                if existing_player.get('status') == 'CONNECTED':
+                                    error = {
+                                        "type": "ERROR",
+                                        "seq_num": self.get_next_seq_num(),
+                                        "code": "DUPLICATE_ID",
+                                        "message": f"Player ID '{new_pid}' is already taken.",
+                                        "rejected_action": pdu
+                                    }
+                                    send_pdu(conn, error)
+                                    continue
+                                else:
+                                    # Reconnect logic: Cancel their timeout timer
+                                    print(f"[server]: Player {new_pid} reconnected.")
+                                    if existing_player.get('timer'):
+                                        existing_player['timer'].cancel()
+
+                            # Step 1: Validation
+                            if not new_pid:
                                 error = {
                                     "type": "ERROR",
                                     "seq_num": self.get_next_seq_num(),
@@ -198,19 +232,7 @@ class MTGNPServer:
                                 }
                                 send_pdu(conn, error)
                                 continue
-                            
-                            if pid in self.players and self.players[pid]['sock'] != conn:
-                                error = {
-                                    "type": "ERROR",
-                                    "seq_num": self.get_next_seq_num(),
-                                    "code": "DUPLICATE_ID",
-                                    "message": f"Player ID '{pid}' is already taken.",
-                                    "rejected_action": pdu
-                                }
-                                send_pdu(conn, error)
-                                continue
 
-                            # Step 1: Validation
                             invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
                             if not (1 <= len(deck) <= 50) or invalid_cards:
                                 error = {
@@ -224,35 +246,59 @@ class MTGNPServer:
                                 continue
 
                             # Step 2: Registration
-                            print(f"[server.py]: Player '{pid}' is ready!")
-                            self.players[pid] = {"deck": deck, "sock": conn}
+                            pid = new_pid
+                            print(f"[server]: Player '{pid}' is ready!")
+                            self.players[pid] = {
+                                "deck": deck,
+                                "sock": conn,
+                                "status": "CONNECTED",
+                                "timer": None
+                            }
 
                             # Step 3: Respond status
-                            self.broadcast_status()
+                            self.broadcast_lobby_status()
 
                             # Step 4: Check if GAME_SETUP can proceed
                             if len(self.players) == 2:
-                                print("[server.py]: Both players are ready. Moving to GAME_SETUP...")
+                                print("[server]: Both players are ready. Moving to GAME_SETUP...")
                                 self.phase = "GAME_SETUP"
-                                # Implement section 6.3
+                                self.engine.start_game_setup()
+
+
+                            pid = new_pid
+                            deck = pdu.get('deck_list', [])
+                            self.players[pid] = {
+                                "deck": deck,
+                                "sock": conn,
+                                "status": "CONNECTED",
+                                "timer": None
+                            }
+                            self.broadcast_lobby_status()
+
+                            if len(self.players) == 2:
+                                self.phase = "GAME_SETUP"
                                 self.engine.start_game_setup()
                     else:
-                        pid = self.get_player_id_by_socket(conn)
-                        if pid:
+                        current_pid = self.get_player_id_by_socket(conn)
+                        if current_pid:
                             self.engine.handle_pdu(pid, pdu)
                             
-            except Exception as e:
-                print("[server.py]: Error: ", e)
+            except Exception:
+                if pid:
+                    self.handle_disconnect(pid)
                 break
         
         with self.lock:
             if self.phase not in ["LOBBY", "GAME_OVER"]:
                 pid = self.get_player_id_by_socket(conn)
                 if pid:
-                    print(f"[server.py]: Player {pid} disconnected during game.")
+                    print(f"[server]: Player {pid} disconnected during game.")
                     self.engine.game_over(loser_id=pid, reason="DISCONNECT")
 
-        print("[server.py]: Closing connection")
+        if pid:
+            self.handle_disconnect(pid)
+
+        print(f"[server]: Closing connection for {addr}...")
         conn.close()
         
     def get_player_id_by_socket(self, sock):

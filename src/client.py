@@ -18,6 +18,23 @@ class MTGNPCLient:
         self.is_running = True
         self.deck = ["mountain_001", "shock_001", "goblin_guide_001"] # Temporary
 
+    def _start_heartbeat(self):
+        thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        thread.start()
+
+    def _heartbeat_loop(self):
+        while self.is_running:
+            time.sleep(30)
+            if self.sock:
+                self.seq_num += 1
+                ping_pdu = {
+                    "type": "PING",
+                    "seq_num": self.seq_num,
+                    "timestamp": time.time()
+                }
+                print(f"[PING] Sending heartbeat (seq: {self.seq_num})")
+                self._send_pdu(ping_pdu)
+
     def _send_pdu(self, pdu):
         try:
             payload = json.dumps(pdu).encode('utf-8')
@@ -75,6 +92,8 @@ class MTGNPCLient:
         if not self.connect_and_identify():
             return
 
+        self._start_heartbeat()
+
         while self.is_running:
             pdu = self._recv_pdu()
 
@@ -91,7 +110,13 @@ class MTGNPCLient:
     def handle_pdu(self, pdu):
         p_type = pdu.get("type")
 
-        if p_type == "GAME_STATE_UPDATE":
+        if pdu.get("type") == "PONG":
+            timestamp = pdu.get("timestamp")
+            seqnum = pdu.get("seq_num")
+            latency = round((time.time() - timestamp) * 1000, 2)
+            print(f"[PONG] Heartbeat acknowledged. (seq: {seqnum}, latency: {latency} ms)")
+
+        elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
             print(f"\n--- STATE UPDATE (Seq: {pdu.get('seq_num')}) ---")
             print(f"Phase: {state.get('phase')}")
