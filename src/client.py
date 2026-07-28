@@ -9,10 +9,10 @@ HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
 
 class MTGNPCLient:
-    def __init__(self, player_id, host = HOST, port = PORT):
+    def __init__(self, player_id):
         self.player_id = player_id
-        self.host = host
-        self.port = port
+        self.host = HOST
+        self.port = PORT
         self.sock = None
         self.seq_num = 0
         self.is_running = True
