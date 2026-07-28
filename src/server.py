@@ -28,8 +28,60 @@ class MTGNPServer:
         self.players = {}
         self.seq_num = 0
         self.phase = "LOBBY"
+        self.game_active = True
         self.lock = threading.Lock()
         self.engine = GameEngine(self)
+
+    def handle_disconnect(self, player_id):
+        if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
+            return
+
+        print(f"[server] Player {player_id} disconnected. Starting {10}s timer...")
+        self.players[player_id]['status'] = 'DISCONNECTED'
+
+        # Start the reconnect timer
+        timer = threading.Timer(10, self.on_reconnect_timeout, [player_id])
+        self.players[player_id]['timer'] = timer
+        timer.start()
+
+    def on_reconnect_timeout(self, player_id):
+        if self.players[player_id]['status'] == 'DISCONNECTED':
+            print(f"[server] FAILURE: {player_id} failed to reconnect. Ending game.")
+            self.broadcast_game_over(loser_id = player_id, reason = "DISCONNECT")
+
+    def broadcast_game_over(self, loser_id, reason):
+        self.game_active = False
+        # Determine winner (one who didn't disconnect)
+        winner_id = next(pid for pid in self.players if pid != loser_id)
+
+        pdu = {
+            "type": "GAME_OVER",
+            "seq_num": 999,
+            "winner_id": winner_id,
+            "loser_id": loser_id,
+            "reason": reason
+        }
+
+        for pid, data in self.players.items():
+            if data['status'] == 'CONNECTED':
+                try:
+                    protocol.send_pdu(data['sock'], pdu)
+                except:
+                    pass
+
+    def handle_client_reconnect(self, new_sock, player_id):
+        if player_id in self.players and self.players[player_id]['status'] == 'DISCONNECTED':
+            print(f"[server] Player {player_id} has reconnected! Cancelling the timeout.")
+
+            # Cancel the timeout timer
+            if self.players[player_id]['timer']:
+                self.players[player_id]['timer'].cancel()
+
+            self.players[player_id]['sock'] = new_sock
+            self.players[player_id]['status'] = 'CONNECTED'
+            self.players[player_id]['timer'] = None
+            return True
+        return False
 
     def broadcast_status(self):
         count_ready = len(self.players)
