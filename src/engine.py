@@ -100,7 +100,7 @@ class GameEngine:
             if self.state.get("phase") == "MULLIGAN":
                 self.mulligan_sequence[p] = seq_num
                 
-            self.server.send_pdu(p, pdu)
+            self.server.send_to_player(p, pdu)
             
         
         print(f"Broadcasting state to players: {self.state}")
