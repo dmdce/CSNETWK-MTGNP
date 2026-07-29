@@ -34,8 +34,8 @@ class GameEngine:
         random.shuffle(deck_p1)
         random.shuffle(deck_p2)
         
-        hand_p1 = [deck_p1.pop() for _ in range(7)]
-        hand_p2 = [deck_p2.pop() for _ in range(7)]
+        hand_p1 = [deck_p1.pop() for _ in range(min(len(deck_p1), 7))]
+        hand_p2 = [deck_p2.pop() for _ in range(min(len(deck_p2), 7))]
         
         first_player = random.choice([p1, p2])
         
@@ -49,7 +49,7 @@ class GameEngine:
             "libraries": {p1: deck_p1, p2: deck_p2},
             "battlefield": {p1: [], p2: []},
             "graveyard": {p1: [], p2: []},
-            "hand_counts": {p1: 7, p2: 7},
+            "hand_counts": {p1: len(hand_p1), p2: len(hand_p2)},
             "stack": [],
             "land_played_this_turn": False
         }
