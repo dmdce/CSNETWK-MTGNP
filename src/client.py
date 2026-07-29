@@ -8,6 +8,7 @@ from protocol import MAX_PDU_SIZE
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
+VERBOSE_MODE = False
 
 class MTGNPClient:
     def __init__(self, player_id):
@@ -41,12 +42,13 @@ class MTGNPClient:
                 self.pong_timer = threading.Timer(10.0, self._on_pong_timeout)
                 self.pong_timer.start()
 
-                print(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
+                if VERBOSE_MODE: print(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
                 self._send_pdu(ping_pdu)
 
     def _on_pong_timeout(self):
-        print(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
-        print("[client] Closing connection due to no response from server...")
+        if VERBOSE_MODE:
+            print(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
+            print("[client] Closing connection due to no response from server...")
 
         if self.sock:
             try:
@@ -61,13 +63,13 @@ class MTGNPClient:
             payload = json.dumps(pdu).encode('utf-8')
 
             if len(payload) > MAX_PDU_SIZE:
-                print(f"[client] Failed to send PDU: payload of {len(payload)} bytes exceeds max PDU size of {MAX_PDU_SIZE}")
+                if VERBOSE_MODE: print(f"[client] Failed to send PDU: payload of {len(payload)} bytes exceeds max PDU size of {MAX_PDU_SIZE}")
                 return
 
             header = struct.pack('>I', len(payload))
             self.sock.sendall(header + payload)
         except (socket.error, AttributeError):
-            print("[client] Failed to send PDU: Socket not connected.")
+            if VERBOSE_MODE: print("[client] Failed to send PDU: Socket not connected.")
 
     def _recv_exact(self, num_bytes):
         chunks = []
@@ -91,7 +93,7 @@ class MTGNPClient:
             length = struct.unpack('>I', header)[0]
 
             if length > MAX_PDU_SIZE:
-                print(f"[client] Rejecting incoming PDU: declared length {length} bytes exceeds max size of {MAX_PDU_SIZE}")
+                if VERBOSE_MODE: print(f"[client] Rejecting incoming PDU: declared length {length} bytes exceeds max size of {MAX_PDU_SIZE}")
                 return None
 
             body = self._recv_exact(length)
@@ -105,7 +107,7 @@ class MTGNPClient:
     def connect_and_identify(self):
         while self.is_running:
             try:
-                print(f"[client] Attempting to connect to {self.host}:{self.port}...")
+                if VERBOSE_MODE: print(f"[client] Attempting to connect to {self.host}:{self.port}...")
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
                 # Bound connection attempt
@@ -114,7 +116,7 @@ class MTGNPClient:
                 # Let PING/PONG detect the dead link once connection is established
                 self.sock.settimeout(None)
 
-                print(f"[client] Connected. Sending PLAYER_READY for '{self.player_id}'...")
+                if VERBOSE_MODE: print(f"[client] Connected. Sending PLAYER_READY for '{self.player_id}'...")
                 self.seq_num += 1
                 ready_pdu = {
                     "type": "PLAYER_READY",
@@ -126,7 +128,7 @@ class MTGNPClient:
                 return True
 
             except (socket.error, ConnectionRefusedError):
-                print("[client] Connection failed. Retrying in 5 seconds...")
+                if VERBOSE_MODE: print("[client] Connection failed. Retrying in 5 seconds...")
                 time.sleep(5)
         return False
 
@@ -140,7 +142,7 @@ class MTGNPClient:
             pdu = self._recv_pdu()
 
             if pdu is None:
-                print("\n[client] !!! TCP Disconnect detected by Peer!")
+                if VERBOSE_MODE: print("\n[client] !!! TCP Disconnect detected by Peer!")
                 # Try to reconnect immediately
                 if self.connect_and_identify():
                     continue
@@ -162,9 +164,9 @@ class MTGNPClient:
                     self.pong_timer.cancel()
 
                 latency = round((time.time() - pdu.get("timestamp")) * 1000, 2)
-                print(f"[PONG] Received. Latency: {latency}ms, ping timer cancelled")
+                if VERBOSE_MODE: print(f"[PONG] Received. Latency: {latency}ms, ping timer cancelled")
             else:
-                print(f"[client] ??? Received stale PONG (expected {self.last_ping_seq}, got {pdu.get('seq_num')})")
+                if VERBOSE_MODE: print(f"[client] ??? Received stale PONG (expected {self.last_ping_seq}, got {pdu.get('seq_num')})")
 
         elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
@@ -175,14 +177,14 @@ class MTGNPClient:
                 print(f"Waiting for: {state.get('waiting_for')}")
 
         elif p_type == "ERROR":
-            print(f"\n[server] ERROR {pdu.get('code')}: {pdu.get('message')}")
+            if VERBOSE_MODE: print(f"\n[client] ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
 
         elif p_type == "GAME_OVER":
             print(f"\n--- GAME OVER ---")
             print(f"Winner: {pdu.get('winner_id')} | Loser: {pdu.get('loser_id')}")
             print(f"Reason: {pdu.get('reason')}")
 
-            print("[client] Returning to lobby. Waiting for next game.")
+            if VERBOSE_MODE: print("[client] Returning to lobby. Waiting for next game.")
             self.seq_num = 0
 
         elif p_type == "PING":
@@ -191,13 +193,18 @@ class MTGNPClient:
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         player = sys.argv[1]
+        if "verbose" in sys.argv[1:]: VERBOSE_MODE = True
     else:
         player = "anonymous"
 
     client = MTGNPClient(player_id = player)
+    if VERBOSE_MODE:
+        print("[client] Verbose mode active!\n")
+    else:
+        print("NOTE: Verbose mode is not active. Debug lines are hidden. Include 'verbose' as a flag to activate verbose mode.\n")
 
     try:
         client.run()
     except KeyboardInterrupt:
-        print("\n[client] Exiting...")
+        if VERBOSE_MODE: print("\n[client] Detected force stop. Exiting...")
         client.is_running = False
