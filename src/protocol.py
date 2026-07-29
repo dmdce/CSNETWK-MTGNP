@@ -1,6 +1,7 @@
 import json
 import struct
-from client import MAX_PDU_SIZE
+
+MAX_PDU_SIZE = 65535
 
 def send_pdu(sock, pdu):
     # Frame JSON PDU with 4-byte big-endian length prefix

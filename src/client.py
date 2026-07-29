@@ -4,12 +4,12 @@ import socket
 import json
 import time
 import threading
+from protocol import MAX_PDU_SIZE
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
-MAX_PDU_SIZE = 65535
 
-class MTGNPCLient:
+class MTGNPClient:
     def __init__(self, player_id):
         self.player_id = player_id
         self.host = HOST
@@ -61,7 +61,7 @@ class MTGNPCLient:
             payload = json.dumps(pdu).encode('utf-8')
 
             if len(payload) > MAX_PDU_SIZE:
-                print(f"[client] Failed to send PDU: payload of {len(payload)} bytes exceeds max PDU size.")
+                print(f"[client] Failed to send PDU: payload of {len(payload)} bytes exceeds max PDU size of {MAX_PDU_SIZE}")
                 return
 
             header = struct.pack('>I', len(payload))
@@ -84,15 +84,14 @@ class MTGNPCLient:
 
     def _recv_pdu(self):
         try:
-            header = self.sock.recv(4)
-
-            if not header:
+            header = self._recv_exact(4)
+            if header is None:
                 return None
 
             length = struct.unpack('>I', header)[0]
 
             if length > MAX_PDU_SIZE:
-                print(f"[client] Rejecting incoming PDU: declared length {length} bytes exceeds max size")
+                print(f"[client] Rejecting incoming PDU: declared length {length} bytes exceeds max size of {MAX_PDU_SIZE}")
                 return None
 
             body = self._recv_exact(length)
@@ -100,7 +99,7 @@ class MTGNPCLient:
                 return None
 
             return json.loads(body.decode('utf-8'))
-        except (socket.error, json.JSONDecodeError):
+        except (socket.error, struct.error, json.JSONDecodeError):
             return None
 
     def connect_and_identify(self):
@@ -108,9 +107,12 @@ class MTGNPCLient:
             try:
                 print(f"[client] Attempting to connect to {self.host}:{self.port}...")
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # Ensures client doesn't hang on dead link:
+
+                # Bound connection attempt
                 self.sock.settimeout(15.0)
                 self.sock.connect((self.host, self.port))
+                # Let PING/PONG detect the dead link once connection is established
+                self.sock.settimeout(None)
 
                 print(f"[client] Connected. Sending PLAYER_READY for '{self.player_id}'...")
                 self.seq_num += 1
@@ -192,7 +194,7 @@ if __name__ == '__main__':
     else:
         player = "anonymous"
 
-    client = MTGNPCLient(player_id = player)
+    client = MTGNPClient(player_id = player)
 
     try:
         client.run()

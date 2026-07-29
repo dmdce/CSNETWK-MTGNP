@@ -28,8 +28,8 @@ class GameEngine:
         p1, p2 = self.player_ids[0], self.player_ids[1]
         
     
-        deck_p1 = copy.deepcopy(self.server.players[p1].deck)
-        deck_p2 = copy.deepcopy(self.server.players[p2].deck)
+        deck_p1 = copy.deepcopy(self.server.players[p1]['deck'])
+        deck_p2 = copy.deepcopy(self.server.players[p2]['deck'])
         
         random.shuffle(deck_p1)
         random.shuffle(deck_p2)

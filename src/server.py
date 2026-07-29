@@ -1,5 +1,6 @@
 import socket
 import threading
+import traceback
 from protocol import send_pdu, recv_pdu
 from engine import GameEngine
 
@@ -246,6 +247,8 @@ class MTGNPServer:
                             self.engine.handle_pdu(pid, pdu)
                             
             except Exception:
+                print(f"[server] Exception in handle_client for {addr} (pid={pid}):")
+                traceback.print_exc()
                 if pid:
                     self.handle_disconnect(pid)
                 break
