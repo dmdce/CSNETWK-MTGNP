@@ -1,7 +1,7 @@
 import socket
 import threading
 import traceback
-from protocol import send_pdu, recv_pdu
+from protocol import send_pdu, recv_pdu, InvalidPduError
 from engine import GameEngine
 
 HOST = socket.gethostbyname(socket.gethostname())
@@ -157,6 +157,20 @@ class MTGNPServer:
         while True:
             try:
                 pdu = recv_pdu(conn)
+            except InvalidPduError as e:
+                print(f"[server] ERROR: Malformed PDU from {addr} (pid={pid}): {e}")
+                try:
+                    send_pdu(conn, {
+                        "type": "ERROR",
+                        "seq_num": self.get_next_sequence_number(),
+                        "code": "INVALID_JSON",
+                        "message": "Payload could not be decoded as UTF-8 JSON."
+                    })
+                except Exception:
+                    pass
+                continue
+
+            try:
                 if not pdu:
                     break
 

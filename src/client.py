@@ -99,7 +99,7 @@ class MTGNPClient:
                 return None
 
             return json.loads(body.decode('utf-8'))
-        except (socket.error, struct.error, json.JSONDecodeError):
+        except (socket.error, struct.error, json.JSONDecodeError, UnicodeDecodeError):
             return None
 
     def connect_and_identify(self):
@@ -140,7 +140,7 @@ class MTGNPClient:
             pdu = self._recv_pdu()
 
             if pdu is None:
-                print("\n[client] TCP Disconnect detected by Peer!")
+                print("\n[client] !!! TCP Disconnect detected by Peer!")
                 # Try to reconnect immediately
                 if self.connect_and_identify():
                     continue
