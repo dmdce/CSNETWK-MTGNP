@@ -204,18 +204,24 @@ class GameEngine:
             "active_player": self.state["active_player"],
             "turn": self.state["turn"]
         })
-        
-            
-    def handle_priority_pass(self, player_id, pdu):
+
+    def _validate_priority_action(self, player_id, pdu):
         seq = pdu.get("seq_num")
-        
+
         if self.state.get("priority_holder") != player_id:
             self.send_error(player_id, "NOT_YOUR_PRIORITY", "You do not currently hold priority.", pdu, seq)
-            return
-        
+            return False
+
         if seq != self.priority_sequence:
-            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {self.priority_sequence}, but got {seq}.", pdu)
+            self.send_error(player_id, "STALE_ACTION",
+                            f"Expected sequence number {self.priority_sequence}, but got {seq}.", pdu)
             self.regrant_priority(player_id)
+            return False
+
+        return True
+
+    def handle_priority_pass(self, player_id, pdu):
+        if not self._validate_priority_action(player_id, pdu):
             return
         
         self.consecutive_passes += 1
@@ -239,10 +245,14 @@ class GameEngine:
         
             
     def handle_cast_spell(self, player_id, pdu):
+        if not self._validate_priority_action(player_id, pdu):
+            return
         # TODO: Implement spell casting logic here
         self.send_personalized_state_update()
     
     def handle_play_land(self, player_id, pdu):
+        if not self._validate_priority_action(player_id, pdu):
+            return
         # TODO: Implement land playing logic here
         self.send_personalized_state_update()
     
@@ -274,7 +284,7 @@ class GameEngine:
         })
     
     def regrant_priority(self, player_id):
-        if self.state.get["priority_holder"] == player_id and self.priority_sequence is not None:
+        if self.state.get("priority_holder") == player_id and self.priority_sequence is not None:
             self.server.send_to_player(player_id, {
                 "type": "PRIORITY_GRANT",
                 "player_id": player_id,
