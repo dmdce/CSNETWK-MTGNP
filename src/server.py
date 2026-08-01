@@ -244,7 +244,8 @@ class MTGNPServer:
                                 "deck": deck,
                                 "sock": conn,
                                 "status": "CONNECTED",
-                                "timer": None
+                                "timer": None,
+                                "last_seq_sent": None
                             }
 
                             # Step 3: Respond status
@@ -291,12 +292,14 @@ class MTGNPServer:
     def send_to_player(self, player_id, pdu):
         if player_id in self.players:
             send_pdu(self.players[player_id]['sock'], pdu)
+            self.players[player_id]['last_seq_sent'] = pdu.get('seq_num')
 
     def broadcast(self, pdu):
         for pid, info in self.players.items():
             if info.get('status') == 'CONNECTED':
                 try:
                     send_pdu(info['sock'], pdu)
+                    info['last_seq_sent'] = pdu.get('seq_num')
                 except Exception:
                     pass
     

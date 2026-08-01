@@ -123,8 +123,8 @@ class GameEngine:
                 case "DISCARD":
                     self.handle_discard(player_id, pdu)
                 case "CONCEDE":
-                    self.game_over(loser_id=player_id, reason="CONCEDE")
-                
+                    # self.game_over(loser_id=player_id, reason="CONCEDE")
+                    self.handle_concede(player_id, pdu)
                     
     def handle_mulligan(self, player_id, pdu):
         seq = pdu.get("seq_num")
@@ -230,6 +230,16 @@ class GameEngine:
             self.consecutive_passes = 0
             if self.state["stack"]:
                 self.resolve_top_stack()
+
+    def handle_concede(self, player_id, pdu):
+        seq = pdu.get("seq_num")
+        expected_seq = self.server.players.get(player_id, {}).get("last_seq_sent")
+
+        if expected_seq is not None and seq != expected_seq:
+            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
+            return
+
+        self.game_over(loser_id=player_id, reason="CONCEDE")
                 
     def resolve_top_stack(self):
         item = self.state["stack"].pop(-1)
