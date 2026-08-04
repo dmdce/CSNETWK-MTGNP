@@ -1,5 +1,16 @@
 import copy
 import random
+from turn_manager import GameRuleError, PRIORITY_STEPS, TurnManager
+
+
+# Minimal fixed-catalog effects owned jointly by Dev 3/4. Unknown cards are
+# still represented on the stack but resolve without a special effect.
+CARD_EFFECTS = {
+    "lightning_bolt": {"kind": "DAMAGE", "amount": 3},
+    "shock": {"kind": "DAMAGE", "amount": 2},
+    "counterspell": {"kind": "COUNTER"},
+    "goblin_guide": {"kind": "CREATURE", "power": 2, "toughness": 2, "haste": True},
+}
 
 class GameEngine:
     def __init__(self, server):
@@ -11,6 +22,7 @@ class GameEngine:
         self.mulligan_sequence = {}
         self.priority_sequence = None
         self.consecutive_passes = 0
+        self.turn_manager = None
         
     def reset_state(self):
         self.state = {}
@@ -20,6 +32,7 @@ class GameEngine:
         self.mulligan_sequence = {}
         self.priority_sequence = None
         self.consecutive_passes = 0
+        self.turn_manager = None
 
     def start_game_setup(self):
 
@@ -120,6 +133,8 @@ class GameEngine:
                     self.handle_cast_spell(player_id, pdu)
                 case "PLAY_LAND":
                     self.handle_play_land(player_id, pdu)
+                case "ACTIVATE_ABILITY":
+                    self.handle_activate_ability(player_id, pdu)
                 case "DISCARD":
                     self.handle_discard(player_id, pdu)
                 case "CONCEDE":
@@ -180,19 +195,13 @@ class GameEngine:
         if not all(self.mulligan_choices.values()):
             return
         
-        self.state["phase"] = "IN_GAME"
-        self.state["turn"] = 1
-        
-        self.broadcast_phase_transition("MULLIGAN", "UNTAP")
-        
-        self.state["phase"] = "UNTAP"
-        self.state["land_played_this_turn"] = False
-        
-        self.send_personalized_state_update()
-        
-        self.broadcast_phase_transition("UNTAP", "UPKEEP")
-        self.state["phase"] = "UPKEEP"
-        
+        self.server.phase = "IN_GAME"
+        self.turn_manager = TurnManager(self.state, self.player_ids)
+        for from_phase, to_phase in self.turn_manager.begin_game():
+            self.state["phase"] = to_phase
+            self.broadcast_phase_transition(from_phase, to_phase)
+            if to_phase == "UNTAP":
+                self.send_personalized_state_update()
         self.grant_priority(self.state["active_player"])
         
     def broadcast_phase_transition(self, from_phase, to_phase):
@@ -224,12 +233,18 @@ class GameEngine:
         if not self._validate_priority_action(player_id, pdu):
             return
         
-        self.consecutive_passes += 1
-        
-        if self.consecutive_passes >= 2:
-            self.consecutive_passes = 0
-            if self.state["stack"]:
-                self.resolve_top_stack()
+        try:
+            outcome = self.turn_manager.pass_priority(player_id)
+        except GameRuleError as error:
+            self.send_error(player_id, error.code, error.message, pdu)
+            return
+
+        if outcome == "TRANSFER":
+            self.grant_priority(self.state["priority_holder"])
+        elif outcome == "RESOLVE":
+            self.resolve_top_stack()
+        else:
+            self.advance_phase()
 
     def handle_concede(self, player_id, pdu):
         seq = pdu.get("seq_num")
@@ -242,34 +257,156 @@ class GameEngine:
         self.game_over(loser_id=player_id, reason="CONCEDE")
                 
     def resolve_top_stack(self):
-        item = self.state["stack"].pop(-1)
-        
+        item = self.turn_manager.pop()
+        legal_targets = [target for target in item.targets if self.turn_manager.target_is_legal(target)]
+        if item.targets and not legal_targets:
+            result, state_changes = "FIZZLE", []
+        else:
+            result = "RESOLVED"
+            state_changes = self._apply_stack_effect(item, legal_targets)
+        if item.item_type == "SPELL" and item.effect.get("kind") != "CREATURE":
+            self.state["graveyard"][item.controller].append(item.source)
         self.server.broadcast({
             "type": "STACK_RESOLVE",
             "seq_num": self.server.get_next_sequence_number(),
-            "stack_item_id": item["stack_item_id"],
-            "result": "RESOLVED",
-            "state_changes": []
+            "stack_item_id": item.stack_item_id,
+            "result": result,
+            "state_changes": state_changes
         })
-        # TODO: Implement the actual resolution logic for the stack item here
-        
+        if self.check_state_based_actions():
+            return
+        self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
             
     def handle_cast_spell(self, player_id, pdu):
         if not self._validate_priority_action(player_id, pdu):
             return
-        # TODO: Implement spell casting logic here
+        card_id = pdu.get("card_id")
+        if card_id not in self.state["hand"][player_id]:
+            self.send_error(player_id, "ILLEGAL_ACTION", "The selected card is not in your hand.", pdu)
+            return
+        effect = self._effect_for(card_id)
+        if effect.get("sorcery", effect.get("kind") == "CREATURE") and not self.turn_manager.is_sorcery_speed(player_id):
+            self.send_error(player_id, "WRONG_PHASE", "This spell may only be cast at sorcery speed.", pdu)
+            return
+        targets = pdu.get("targets", [])
+        if effect.get("kind") in {"DAMAGE", "COUNTER"} and not targets:
+            self.send_error(player_id, "ILLEGAL_TARGET", "This spell requires a target.", pdu)
+            return
+        try:
+            self.turn_manager.pay_mana(player_id, pdu.get("mana_payment", {}))
+        except GameRuleError as error:
+            self.send_error(player_id, error.code, error.message, pdu)
+            return
+        self.state["hand"][player_id].remove(card_id)
+        self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
+        item = self.turn_manager.push("SPELL", card_id, player_id, targets, effect)
+        self.server.broadcast({"type": "STACK_PUSH", "seq_num": self.server.get_next_sequence_number(), **item.public()})
         self.send_personalized_state_update()
+        self.grant_priority(player_id)
     
     def handle_play_land(self, player_id, pdu):
         if not self._validate_priority_action(player_id, pdu):
             return
-        # TODO: Implement land playing logic here
+        try:
+            self.turn_manager.play_land(player_id, pdu.get("card_id"))
+        except GameRuleError as error:
+            self.send_error(player_id, error.code, error.message, pdu)
+            return
         self.send_personalized_state_update()
+        self.grant_priority(player_id)
+
+    def handle_activate_ability(self, player_id, pdu):
+        if not self._validate_priority_action(player_id, pdu):
+            return
+        source_id = pdu.get("source_id")
+        permanent = next((card for card in self.state["battlefield"][player_id]
+                          if isinstance(card, dict) and card.get("id") == source_id), None)
+        if permanent is None:
+            self.send_error(player_id, "ILLEGAL_ACTION", "Ability source is not under your control.", pdu)
+            return
+        payment = pdu.get("cost_payment", {})
+        if payment.get("tap") and permanent.get("tapped"):
+            self.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
+            return
+        if payment.get("tap"):
+            permanent["tapped"] = True
+        abilities = permanent.get("abilities", [])
+        ability_index = pdu.get("ability_index")
+        if not isinstance(ability_index, int) or ability_index < 0 or ability_index >= len(abilities):
+            if payment.get("tap"):
+                permanent["tapped"] = False
+            self.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
+            return
+        item = self.turn_manager.push("ABILITY", source_id, player_id, pdu.get("targets", []),
+                                      abilities[ability_index])
+        self.server.broadcast({"type": "STACK_PUSH", "seq_num": self.server.get_next_sequence_number(), **item.public()})
+        self.send_personalized_state_update()
+        self.grant_priority(player_id)
     
     # def handle_discard(self, player_id, pdu):
     #     # TODO: Implement discard logic here
     #     self.send_personalized_state_update()
-        
+
+    def advance_phase(self):
+        try:
+            from_phase, to_phase = self.turn_manager.advance_priority_step()
+        except GameRuleError:
+            # BEGIN_COMBAT is the explicit hand-off to Dev 4's combat machine.
+            return
+        self.broadcast_phase_transition(from_phase, to_phase)
+        if to_phase == "CLEANUP":
+            self.send_personalized_state_update()
+            if len(self.state["hand"][self.state["active_player"]]) <= 7:
+                self.end_turn()
+            return
+        self.send_personalized_state_update()
+        if to_phase in PRIORITY_STEPS:
+            self.grant_priority(self.state["active_player"])
+
+    @staticmethod
+    def _effect_for(card_id):
+        name = str(card_id).lower()
+        for prefix, effect in CARD_EFFECTS.items():
+            if name.startswith(prefix):
+                return dict(effect)
+        return {}
+
+    def _apply_stack_effect(self, item, legal_targets):
+        effect = item.effect
+        changes = []
+        if effect.get("kind") == "DAMAGE" and legal_targets:
+            target, amount = legal_targets[0], effect["amount"]
+            if target in self.player_ids:
+                self.state["life_totals"][target] -= amount
+            else:
+                for zone in self.state["battlefield"].values():
+                    for permanent in zone:
+                        if isinstance(permanent, dict) and permanent.get("id") == target:
+                            permanent["damage"] = permanent.get("damage", 0) + amount
+            changes.append({"change_type": "DAMAGE", "target": target, "amount": amount})
+        elif effect.get("kind") == "COUNTER" and legal_targets:
+            target = legal_targets[0]
+            for index, public in enumerate(self.state["stack"]):
+                if public["stack_item_id"] == target:
+                    self.state["stack"].pop(index)
+                    countered = self.turn_manager.stack_items.pop(target)
+                    self.state["graveyard"][countered.controller].append(countered.source)
+                    changes.append({"change_type": "COUNTER", "target": target})
+                    break
+        elif effect.get("kind") == "CREATURE":
+            self.state["battlefield"][item.controller].append({
+                "id": item.source,
+                "controller_id": item.controller,
+                "tapped": False,
+                "damage": 0,
+                "power": effect["power"],
+                "toughness": effect["toughness"],
+                "summoning_sick": not effect.get("haste", False),
+            })
+            changes.append({"change_type": "ENTER_BATTLEFIELD", "target": item.source})
+        return changes
+
     def grant_priority(self, player_id):
         if self.check_state_based_actions():
             return
@@ -305,6 +442,8 @@ class GameEngine:
     def check_state_based_actions(self):
         if self.server.phase != "IN_GAME":
             return False
+        if self.turn_manager:
+            self.turn_manager.apply_state_based_actions()
         p1, p2 = self.player_ids[0], self.player_ids[1]
         life_p1 = self.state["life_totals"][p1]
         life_p2 = self.state["life_totals"][p2]
@@ -332,6 +471,10 @@ class GameEngine:
         
         card_ids = pdu.get("card_ids", [])
         hand = self.state["hand"][player_id]
+
+        if not card_ids:
+            self.send_error(player_id, "ILLEGAL_ACTION", "At least one card must be discarded.", pdu, seq)
+            return
         
         temp_hand = list(hand)
         try:
@@ -351,23 +494,17 @@ class GameEngine:
             self.end_turn()
             
     def end_turn(self):
-        self.state["turn"] += 1
-        
-        ap = self.state["active_player"]
-        nap = self.player_ids[1] if ap == self.player_ids[0] else self.player_ids[0]
-        
-        self.state["active_player"] = nap
-        
-        self.broadcast_phase_transition("CLEANUP", "UNTAP")
-        self.state["phase"] = "UNTAP"
-        
-        self.state["land_played_this_turn"] = False
-        self.send_personalized_state_update()
-        
-        self.broadcast_phase_transition("UNTAP", "UPKEEP")
-        self.state["phase"] = "UPKEEP"
-        self.grant_priority(nap)
-        
+        try:
+            transitions = self.turn_manager.finish_cleanup()
+        except GameRuleError:
+            return
+        for from_phase, to_phase in transitions:
+            self.state["phase"] = to_phase
+            self.broadcast_phase_transition(from_phase, to_phase)
+            if to_phase == "UNTAP":
+                self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
+
         
     
     def game_over(self, loser_id, reason):
