@@ -199,14 +199,15 @@ class MTGNPServer:
                                 existing_player = self.players[new_pid]
 
                                 if existing_player.get('status') == 'CONNECTED':
-                                    error = {
-                                        "type": "ERROR",
-                                        "seq_num": self.get_next_sequence_number(),
-                                        "code": "DUPLICATE_ID",
-                                        "message": f"Player ID '{new_pid}' is already taken.",
-                                        "rejected_action": pdu
-                                    }
-                                    if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu, self.get_next_sequence_number())
+                                    # error = {
+                                    #     "type": "ERROR",
+                                    #     "seq_num": self.get_next_sequence_number(),
+                                    #     "code": "DUPLICATE_ID",
+                                    #     "message": f"Player ID '{new_pid}' is already taken.",
+                                    #     "rejected_action": pdu
+                                    # }
+                                    # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                     send_pdu(conn, error)
                                     continue
                                 else:
@@ -230,15 +231,16 @@ class MTGNPServer:
 
                             invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
                             if not (1 <= len(deck) <= 50) or invalid_cards:
-                                error = {
-                                    "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_number(),
-                                    "code": "ILLEGAL_DECK",
-                                    "message": "Invalid deck size, or contains illegal cards.",
-                                    "rejected_action": pdu
-                                }
-                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
-                                send_pdu(conn, error)
+                                self.send_error(new_pid, "ILLEGAL_DECK", "Invalid deck size, or contains illegal cards.", pdu, self.get_next_sequence_number())
+                                # error = {
+                                #     "type": "ERROR",
+                                #     "seq_num": self.get_next_sequence_number(),
+                                #     "code": "ILLEGAL_DECK",
+                                #     "message": "Invalid deck size, or contains illegal cards.",
+                                #     "rejected_action": pdu
+                                # }
+                                # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                # send_pdu(conn, error)
                                 continue
 
                             # Step 2: Registration
@@ -310,6 +312,38 @@ class MTGNPServer:
     def get_next_sequence_number(self):
         self.seq_num += 1
         return self.seq_num
+
+    """
+    name: send_error
+    description: Sends an ERROR PDU to a specific player.
+    
+    @param player_id (str): Target Player ID.
+    @param code (str): Error code.
+    @param message (str): Error message.
+    @param rejected_action (dict, optional): PDU that caused the error.
+    @param seq (int, optional): Sequence number to use. If None, use server's next sequence number.
+    """
+    def send_error(self, player_id, code, message, rejected_action=None, seq=None):
+        if player_id not in self.players or self.players[player_id].get('status') != 'CONNECTED':
+            return # Client is already gone
+
+        seq_num = seq if seq is not None else self.get_next_sequence_number()
+
+        error_pdu = {
+            "type": "ERROR",
+            "seq_num": seq_num,
+            "code": code,
+            "message": message
+        }
+        if rejected_action is not None:
+            error_pdu["rejected_action"] = rejected_action
+
+        if VERBOSE_MODE: print(f"[server] Sending ERROR to {player_id}: {error_pdu}")
+
+        try:
+            send_pdu(self.players[player_id]['sock'], error_pdu)
+        except Exception:
+            pass
 
     def start(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -145,7 +145,7 @@ class GameEngine:
         seq = pdu.get("seq_num")
         expected_seq = self.mulligan_sequence.get(player_id)
         if expected_seq is not None and seq != expected_seq:
-            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
+            self.server.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
             return
         
         keep = pdu.get("keep", True)
@@ -155,7 +155,7 @@ class GameEngine:
             expected_bottom = self.mulligan_counts[player_id]
             
             if len(cards_to_bottom) != expected_bottom:
-                self.send_error(player_id, "ILLEGAL_ACTION", f"Expected to bottom {expected_bottom} cards, but got {len(cards_to_bottom)}.", pdu)
+                self.server.send_error(player_id, "ILLEGAL_ACTION", f"Expected to bottom {expected_bottom} cards, but got {len(cards_to_bottom)}.", pdu)
                 return
             
             hand = self.state["hand"][player_id]
@@ -166,7 +166,7 @@ class GameEngine:
                 for card_id in cards_to_bottom:
                     temp_hand.remove(card_id)
             except ValueError:
-                self.send_error(player_id, "ILLEGAL_ACTION", "One or more cards to bottom are not in the player's hand.", pdu)
+                self.server.send_error(player_id, "ILLEGAL_ACTION", "One or more cards to bottom are not in the player's hand.", pdu)
                 return
         
             self.state["hand"][player_id] = temp_hand
@@ -221,11 +221,11 @@ class GameEngine:
         seq = pdu.get("seq_num")
 
         if self.state.get("priority_holder") != player_id:
-            self.send_error(player_id, "NOT_YOUR_PRIORITY", "You do not currently hold priority.", pdu, seq)
+            self.server.send_error(player_id, "NOT_YOUR_PRIORITY", "You do not currently hold priority.", pdu, seq)
             return False
 
         if seq != self.priority_sequence:
-            self.send_error(player_id, "STALE_ACTION",
+            self.server.send_error(player_id, "STALE_ACTION",
                             f"Expected sequence number {self.priority_sequence}, but got {seq}.", pdu)
             self.regrant_priority(player_id)
             return False
@@ -239,7 +239,7 @@ class GameEngine:
         try:
             outcome = self.turn_manager.pass_priority(player_id)
         except GameRuleError as error:
-            self.send_error(player_id, error.code, error.message, pdu)
+            self.server.send_error(player_id, error.code, error.message, pdu)
             return
 
         if outcome == "TRANSFER":
@@ -254,7 +254,7 @@ class GameEngine:
         expected_seq = self.server.players.get(player_id, {}).get("last_seq_sent")
 
         if expected_seq is not None and seq != expected_seq:
-            self.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
+            self.server.send_error(player_id, "STALE_ACTION", f"Expected sequence number {expected_seq}, but got {seq}.", pdu)
             return
 
         self.game_over(loser_id=player_id, reason="CONCEDE")
@@ -291,20 +291,20 @@ class GameEngine:
             return
         card_id = pdu.get("card_id")
         if card_id not in self.state["hand"][player_id]:
-            self.send_error(player_id, "ILLEGAL_ACTION", "The selected card is not in your hand.", pdu)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "The selected card is not in your hand.", pdu)
             return
         effect = self._effect_for(card_id)
         if effect.get("sorcery", effect.get("kind") == "CREATURE") and not self.turn_manager.is_sorcery_speed(player_id):
-            self.send_error(player_id, "WRONG_PHASE", "This spell may only be cast at sorcery speed.", pdu)
+            self.server.send_error(player_id, "WRONG_PHASE", "This spell may only be cast at sorcery speed.", pdu)
             return
         targets = pdu.get("targets", [])
         if effect.get("kind") in {"DAMAGE", "COUNTER"} and not targets:
-            self.send_error(player_id, "ILLEGAL_TARGET", "This spell requires a target.", pdu)
+            self.server.send_error(player_id, "ILLEGAL_TARGET", "This spell requires a target.", pdu)
             return
         try:
             self.turn_manager.pay_mana(player_id, pdu.get("mana_payment", {}))
         except GameRuleError as error:
-            self.send_error(player_id, error.code, error.message, pdu)
+            self.server.send_error(player_id, error.code, error.message, pdu)
             return
         self.state["hand"][player_id].remove(card_id)
         self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
@@ -319,7 +319,7 @@ class GameEngine:
         try:
             self.turn_manager.play_land(player_id, pdu.get("card_id"))
         except GameRuleError as error:
-            self.send_error(player_id, error.code, error.message, pdu)
+            self.server.send_error(player_id, error.code, error.message, pdu)
             return
         self.send_personalized_state_update()
         self.grant_priority(player_id)
@@ -331,11 +331,11 @@ class GameEngine:
         permanent = next((card for card in self.state["battlefield"][player_id]
                           if isinstance(card, dict) and card.get("id") == source_id), None)
         if permanent is None:
-            self.send_error(player_id, "ILLEGAL_ACTION", "Ability source is not under your control.", pdu)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Ability source is not under your control.", pdu)
             return
         payment = pdu.get("cost_payment", {})
         if payment.get("tap") and permanent.get("tapped"):
-            self.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
             return
         if payment.get("tap"):
             permanent["tapped"] = True
@@ -344,7 +344,7 @@ class GameEngine:
         if not isinstance(ability_index, int) or ability_index < 0 or ability_index >= len(abilities):
             if payment.get("tap"):
                 permanent["tapped"] = False
-            self.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
             return
         item = self.turn_manager.push("ABILITY", source_id, player_id, pdu.get("targets", []),
                                       abilities[ability_index])
@@ -433,17 +433,17 @@ class GameEngine:
         print(f"[engine] Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
         
-    def send_error(self, player_id, code, message, pdu, seq=None):
-        error_pdu = {
-            "type": "ERROR",
-            "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
-            "code": code,
-            "message": message,
-            "rejected_action": pdu
-        }
-
-        print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
-        self.server.send_to_player(player_id, error_pdu)
+    # def send_error(self, player_id, code, message, pdu, seq=None):
+    #     error_pdu = {
+    #         "type": "ERROR",
+    #         "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
+    #         "code": code,
+    #         "message": message,
+    #         "rejected_action": pdu
+    #     }
+    #
+    #     print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
+    #     self.server.send_to_player(player_id, error_pdu)
     
     def regrant_priority(self, player_id):
         if self.state.get("priority_holder") == player_id and self.priority_sequence is not None:
@@ -484,14 +484,14 @@ class GameEngine:
         ap = self.state["active_player"]
         
         if self.state["phase"] != "CLEANUP" or player_id != ap:
-            self.send_error(player_id, "ILLEGAL_ACTION", "Can only discard during your cleanup step.", pdu, seq)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Can only discard during your cleanup step.", pdu, seq)
             return
         
         card_ids = pdu.get("card_ids", [])
         hand = self.state["hand"][player_id]
 
         if not card_ids:
-            self.send_error(player_id, "ILLEGAL_ACTION", "At least one card must be discarded.", pdu, seq)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "At least one card must be discarded.", pdu, seq)
             return
         
         temp_hand = list(hand)
@@ -499,7 +499,7 @@ class GameEngine:
             for card in card_ids:
                 temp_hand.remove(card)
         except ValueError:
-            self.send_error(player_id, "ILLEGAL_ACTION", "Discarded cards not in hand.", pdu, seq)
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Discarded cards not in hand.", pdu, seq)
             return
         
         self.state["hand"][player_id] = temp_hand
