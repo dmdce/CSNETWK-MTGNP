@@ -180,13 +180,49 @@ class MTGNPClient:
 
         elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
-            print(f"\n--- STATE UPDATE (Seq: {pdu.get('seq_num')}) ---")
-            print(f"Phase: {state.get('phase')}")
-            print(f"Players Ready: {state.get('players_ready')}")
-            if state.get('waiting_for'):
-                print(f"Waiting for: {state.get('waiting_for')}")
+            phase = state.get("phase")
+            seq_num = pdu.get("seq_num")
+            print(f"\n--- STATE UPDATE (Seq: {seq_num}) ---")
+            print(f"Current Phase: {phase}")
 
-            if VERBOSE_MODE: print(f"[client] Received GAME_STATE_UPDATE: {pdu}")
+            # VARIANT A: Lobby State Shape
+            if phase == "LOBBY":
+                ready_count = state.get("players_ready", 0)
+                waiting_for = state.get("waiting_for", [])
+                print(f"Status: Waiting in Lobby ({ready_count}/2 Players Ready)")
+                if waiting_for:
+                    print(f"Waiting for remaining players: {', '.join(waiting_for)}")
+
+
+            # VARIANT B: In-Game State Shape (MULLIGAN, MAIN_1, COMBAT, etc.)
+            else:
+                turn = state.get("turn", 0)
+                active_player = state.get("active_player")
+                priority = state.get("priority_holder")
+                stack = state.get("stack", [])
+                players = state.get("players", {})
+                print(f"Turn: {turn} | Active Player: {active_player} | Priority: {priority}")
+                print(f"Stack ({len(stack)} items): {stack}")
+                print("-" * 55)
+
+                # Local Player View
+                my_data = players.get(self.player_id, {})
+                print(f"[Your View - {self.player_id}]")
+                print(f"  Life: {my_data.get('life', 20)} | Library: {my_data.get('library_count', 0)}")
+                print(f"  Hand ({my_data.get('hand_count', 0)}): {my_data.get('hand', [])}")
+                print(f"  Battlefield: {my_data.get('battlefield', [])}")
+                print("-" * 55)
+
+                # Opponent View
+                for pid, pdata in players.items():
+                    if pid != self.player_id:
+                        print(f"[Opponent View - {pid}]")
+                        print(f"  Life: {pdata.get('life', 20)} | Hand Count: {pdata.get('hand_count', 0)}")
+                        print(f"  Battlefield: {pdata.get('battlefield', [])}")
+                        print(f"  Graveyard: {pdata.get('graveyard', [])}")
+
+            if VERBOSE_MODE:
+                print(f"[client] Received GAME_STATE_UPDATE: {pdu}")
 
         elif p_type == "ERROR":
             if VERBOSE_MODE: print(f"\n[client] ERROR from server ({pdu.get('code')}): {pdu.get('message')}")

@@ -130,7 +130,8 @@ class MTGNPServer:
 
     def broadcast_lobby_status(self):
         count_ready = len(self.players)
-        waiting_for = ["player_2"] if count_ready == 1 else []
+        all_expected = ["player_1", "player_2"]
+        waiting_for = [pid for pid in all_expected if pid not in self.players]
 
         update = {
             "type": "GAME_STATE_UPDATE",
