@@ -14,6 +14,12 @@ CARD_EFFECTS = {
 
 class GameEngine:
     def __init__(self, server):
+        """
+        name: __init__
+        description: Initializes the game engine with a reference to the server and resets game state.
+        @param: server (MTGNPServer): The server instance that owns this engine.
+        """
+
         self.server = server
         self.state = {}
         self.player_ids = []
@@ -25,6 +31,11 @@ class GameEngine:
         self.turn_manager = None
         
     def reset_state(self):
+        """
+        name: reset_state
+        description: Clears all game state variables to prepare for a new game.
+        """
+
         self.state = {}
         self.player_ids = []
         self.mulligan_choices = {}
@@ -35,6 +46,11 @@ class GameEngine:
         self.turn_manager = None
 
     def start_game_setup(self):
+        """
+        name: start_game_setup
+        description: Performs initial deck shuffling, card drawing, and first-player selection,
+                     then sends initial state updates.
+        """
 
         self.player_ids = list(self.server.players.keys())
         
@@ -75,6 +91,12 @@ class GameEngine:
         self.server.phase = "MULLIGAN"
 
     def send_personalized_state_update(self, target_player=None):
+        """
+        name: send_personalized_state_update
+        description: Sends a GAME_STATE_UPDATE to one or both players, filtering hidden information per player.
+        @param: target_player (str or None): If provided, sends only to that player; otherwise sends to both.
+        """
+
         seq_num = self.server.get_next_sequence_number()
         p1, p2 = self.player_ids[0], self.player_ids[1]
 
@@ -119,6 +141,13 @@ class GameEngine:
         print(f"Broadcasting state to players: {self.state}")
         
     def handle_pdu(self, player_id, pdu):
+        """
+        name: handle_pdu
+        description: Dispatches incoming player PDUs to the appropriate handler based on the current game phase.
+        @param: player_id (str): The ID of the player who sent the PDU.
+        @param: pdu (dict): The received PDU.
+        """
+
         pdu_type = pdu.get("type")
         
         if self.server.phase == "MULLIGAN":
@@ -142,6 +171,13 @@ class GameEngine:
                     self.handle_concede(player_id, pdu)
                     
     def handle_mulligan(self, player_id, pdu):
+        """
+        name: handle_mulligan
+        description: Processes a MULLIGAN_CHOICE PDU, performing either a keep or a mulligan redraw.
+        @param: player_id (str): The player making the choice.
+        @param: pdu (dict): The MULLIGAN_CHOICE PDU.
+        """
+
         seq = pdu.get("seq_num")
         expected_seq = self.mulligan_sequence.get(player_id)
         if expected_seq is not None and seq != expected_seq:
@@ -192,6 +228,11 @@ class GameEngine:
             self.send_personalized_state_update(target_player=player_id)
             
     def transition_to_game(self):
+        """
+        name: transition_to_game
+        description: Transitions from MULLIGAN to IN_GAME, initializing the TurnManager and beginning the first turn.
+        """
+
         if not all(self.mulligan_choices.values()):
             return
         
@@ -205,6 +246,13 @@ class GameEngine:
         self.grant_priority(self.state["active_player"])
         
     def broadcast_phase_transition(self, from_phase, to_phase):
+        """
+        name: broadcast_phase_transition
+        description: Sends a PHASE_TRANSITION PDU to all players.
+        @param: from_phase (str): The phase being transitioned from.
+        @param: to_phase (str): The phase being transitioned to.
+        """
+
         pdu = {
             "type": "PHASE_TRANSITION",
             "seq_num": self.server.get_next_sequence_number(),
@@ -218,6 +266,14 @@ class GameEngine:
         self.server.broadcast(pdu)
 
     def _validate_priority_action(self, player_id, pdu):
+        """
+        name: _validate_priority_action
+        description: Checks that the player holds priority and the seq_num matches the current priority token.
+        @param: player_id (str): The player attempting the action.
+        @param: pdu (dict): The action PDU.
+        @return: bool: True if valid, False if an error was sent.
+        """
+
         seq = pdu.get("seq_num")
 
         if self.state.get("priority_holder") != player_id:
@@ -233,6 +289,13 @@ class GameEngine:
         return True
 
     def handle_priority_pass(self, player_id, pdu):
+        """
+        name: handle_priority_pass
+        description: Processes a PRIORITY_PASS PDU, transferring priority, resolving stack, or advancing phase.
+        @param: player_id (str): The player passing priority.
+        @param: pdu (dict): The PRIORITY_PASS PDU.
+        """
+
         if not self._validate_priority_action(player_id, pdu):
             return
         
@@ -250,6 +313,13 @@ class GameEngine:
             self.advance_phase()
 
     def handle_concede(self, player_id, pdu):
+        """
+        name: handle_concede
+        description: Processes a CONCEDE PDU, ending the game with the conceding player as the loser.
+        @param: player_id (str): The player conceding.
+        @param: pdu (dict): The CONCEDE PDU.
+        """
+
         seq = pdu.get("seq_num")
         expected_seq = self.server.players.get(player_id, {}).get("last_seq_sent")
 
@@ -260,6 +330,11 @@ class GameEngine:
         self.game_over(loser_id=player_id, reason="CONCEDE")
                 
     def resolve_top_stack(self):
+        """
+        name: resolve_top_stack
+        description: Pops the top stack item, applies its effect, broadcasts STACK_RESOLVE, and grants priority.
+        """
+
         item = self.turn_manager.pop()
         legal_targets = [target for target in item.targets if self.turn_manager.target_is_legal(target)]
         if item.targets and not legal_targets:
@@ -287,6 +362,13 @@ class GameEngine:
         self.grant_priority(self.state["active_player"])
             
     def handle_cast_spell(self, player_id, pdu):
+        """
+        name: handle_cast_spell
+        description: Processes a CAST_SPELL PDU, validates mana and targets, pushes the spell to the stack.
+        @param: player_id (str): The player casting the spell.
+        @param: pdu (dict): The CAST_SPELL PDU.
+        """
+
         if not self._validate_priority_action(player_id, pdu):
             return
         card_id = pdu.get("card_id")
@@ -314,6 +396,13 @@ class GameEngine:
         self.grant_priority(player_id)
     
     def handle_play_land(self, player_id, pdu):
+        """
+        name: handle_play_land
+        description: Processes a PLAY_LAND PDU, placing the land on the battlefield if legal.
+        @param: player_id (str): The player playing the land.
+        @param: pdu (dict): The PLAY_LAND PDU.
+        """
+
         if not self._validate_priority_action(player_id, pdu):
             return
         try:
@@ -325,6 +414,13 @@ class GameEngine:
         self.grant_priority(player_id)
 
     def handle_activate_ability(self, player_id, pdu):
+        """
+        name: handle_activate_ability
+        description: Processes an ACTIVATE_ABILITY PDU, validates costs, and pushes the ability to the stack.
+        @param: player_id (str): The player activating the ability.
+        @param: pdu (dict): The ACTIVATE_ABILITY PDU.
+        """
+
         if not self._validate_priority_action(player_id, pdu):
             return
         source_id = pdu.get("source_id")
@@ -357,6 +453,12 @@ class GameEngine:
     #     self.send_personalized_state_update()
 
     def advance_phase(self):
+        """
+        name: advance_phase
+        description: Advances the game phase via the TurnManager, broadcasting PHASE_TRANSITION
+                     and granting priority when needed.
+        """
+
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
         except GameRuleError:
@@ -374,6 +476,13 @@ class GameEngine:
 
     @staticmethod
     def _effect_for(card_id):
+        """
+        name: _effect_for
+        description: Returns the effect dictionary for a card based on its ID prefix, or an empty dict if unknown.
+        @param: card_id (str): The card identifier.
+        @return: dict: The effect definition, or an empty dictionary.
+        """
+
         name = str(card_id).lower()
         for prefix, effect in CARD_EFFECTS.items():
             if name.startswith(prefix):
@@ -381,6 +490,14 @@ class GameEngine:
         return {}
 
     def _apply_stack_effect(self, item, legal_targets):
+        """
+        name: _apply_stack_effect
+        description: Applies the resolved effect of a stack item (damage, counter, creature entry) and returns state changes.
+        @param: item (StackItem): The stack item being resolved.
+        @param: legal_targets (list): The list of targets that are still legal.
+        @return: list: A list of state change dictionaries.
+        """
+
         effect = item.effect
         changes = []
         if effect.get("kind") == "DAMAGE" and legal_targets:
@@ -416,6 +533,12 @@ class GameEngine:
         return changes
 
     def grant_priority(self, player_id):
+        """
+        name: grant_priority
+        description: Issues a PRIORITY_GRANT PDU to the specified player, updating the priority holder state.
+        @param: player_id (str): The player who now holds priority.
+        """
+
         if self.check_state_based_actions():
             return
         
@@ -446,6 +569,12 @@ class GameEngine:
     #     self.server.send_to_player(player_id, error_pdu)
     
     def regrant_priority(self, player_id):
+        """
+        name: regrant_priority
+        description: Re-sends the current PRIORITY_GRANT PDU with the same sequence number to a player after a stale action.
+        @param: player_id (str): The player who should receive the regrant.
+        """
+
         if self.state.get("priority_holder") == player_id and self.priority_sequence is not None:
             regrant_priority_grant_pdu = {
                 "type": "PRIORITY_GRANT",
@@ -458,6 +587,13 @@ class GameEngine:
             self.server.send_to_player(player_id, regrant_priority_grant_pdu)
                 
     def check_state_based_actions(self):
+        """
+        name: check_state_based_actions
+        description: Checks and applies state-based actions (lethal damage, life zero, etc.)
+                     and triggers GAME_OVER if needed.
+        @return: bool: True if a GAME_OVER was triggered, False otherwise.
+        """
+
         if self.server.phase != "IN_GAME":
             return False
         if self.turn_manager:
@@ -480,6 +616,13 @@ class GameEngine:
         return False
     
     def handle_discard(self, player_id, pdu):
+        """
+        name: handle_discard
+        description: Processes a DISCARD PDU during Cleanup, moving cards from hand to graveyard until hand size ≤7.
+        @param: player_id (str): The player discarding cards.
+        @param: pdu (dict): The DISCARD PDU.
+        """
+
         seq = pdu.get("seq_num")
         ap = self.state["active_player"]
         
@@ -512,6 +655,11 @@ class GameEngine:
             self.end_turn()
             
     def end_turn(self):
+        """
+        name: end_turn
+        description: Finishes the Cleanup step, clears damage/effects, switches active player, and begins the next turn.
+        """
+
         try:
             transitions = self.turn_manager.finish_cleanup()
         except GameRuleError:
@@ -522,10 +670,15 @@ class GameEngine:
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
         self.grant_priority(self.state["active_player"])
-
-        
     
     def game_over(self, loser_id, reason):
+        """
+        name: game_over
+        description: Broadcasts a GAME_OVER PDU, resets the server to LOBBY state, and clears the game engine.
+        @param: loser_id (str): The ID of the losing player.
+        @param: reason (str): The reason for game over (LIFE_ZERO, CONCEDE, DISCONNECT).
+        """
+
         if not self.player_ids:
             return
         
@@ -555,10 +708,20 @@ class GameEngine:
         self.server.reset_lobby_state()
 
     def stop(self):
+        """
+        name: stop
+        description: (As placeholder) Stops the game engine.
+        """
+
         self.state = "stopped"
         print("Game stopped.")
 
     def update(self):
+        """
+        name: update
+        description: (As placeholder) Prints current running status.
+        """
+
         if self.state == "running":
             print("Game is updating...")
         else:
