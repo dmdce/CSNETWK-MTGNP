@@ -20,7 +20,16 @@ class MTGNPClient:
         self.last_ping_seq = -1
         self.pong_timer = None
         self.is_running = True
-        self.deck = ["mountain_001", "shock_001", "goblin_guide_001"] # Temporary
+        self.deck = ["counterspell_001", "counterspell_002", "counterspell_003", "counterspell_004",
+                    "goblin_guide_001", "goblin_guide_002", "goblin_guide_003", "goblin_guide_004",
+                    "island_001", "island_002", "island_003", "island_004", "island_005", "island_006", "island_007", "island_008", "island_009", "island_010",
+                    "lightning_bolt_001", "lightning_bolt_002", "lightning_bolt_003", "lightning_bolt_004",
+                    "mana_leak_001", "mana_leak_002", "mana_leak_003", "mana_leak_004",
+                    "monastery_swiftspear_001", "monastery_swiftspear_002", "monastery_swiftspear_003", "monastery_swiftspear_004",
+                    "mountain_001", "mountain_002", "mountain_003", "mountain_004", "mountain_005", "mountain_006", "mountain_007", "mountain_008", "mountain_009", "mountain_010",
+                    "phantasmal_bear_001", "phantasmal_bear_002", "phantasmal_bear_003", "phantasmal_bear_004",
+                    "ponder_001", "ponder_002", "ponder_003", "ponder_004",
+                    "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
 
     def _start_heartbeat(self):
         thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
