@@ -177,6 +177,8 @@ class MTGNPClient:
             if state.get('waiting_for'):
                 print(f"Waiting for: {state.get('waiting_for')}")
 
+            if VERBOSE_MODE: print(f"[client] Received GAME_STATE_UPDATE: {pdu}")
+
         elif p_type == "ERROR":
             if VERBOSE_MODE: print(f"\n[client] ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
 
