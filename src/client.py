@@ -12,6 +12,12 @@ VERBOSE_MODE = False
 
 class MTGNPClient:
     def __init__(self, player_id):
+        """
+        name: __init__
+        description: Initializes the MTGNP client with the given player ID and sets up default attributes.
+        @param: player_id (str): Unique identifier for this client player.
+        """
+
         self.player_id = player_id
         self.host = HOST
         self.port = PORT
@@ -32,10 +38,20 @@ class MTGNPClient:
                     "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
 
     def _start_heartbeat(self):
+        """
+        name: _start_heartbeat
+        description: Launches a background thread that periodically sends PING PDUs to the server.
+        """
+
         thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         thread.start()
 
     def _heartbeat_loop(self):
+        """
+        name: _heartbeat_loop
+        description: Continuously sends PING PDUs every 30 seconds and starts a timeout timer for each PONG.
+        """
+
         while self.is_running:
             time.sleep(30)
             if self.sock:
@@ -55,6 +71,11 @@ class MTGNPClient:
                 self._send_pdu(ping_pdu)
 
     def _on_pong_timeout(self):
+        """
+        name: _on_pong_timeout
+        description: Called when the PONG response times out, forcing the socket to close to trigger reconnection.
+        """
+
         if VERBOSE_MODE:
             print(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
             print("[client] Closing connection due to no response from server...")
@@ -68,6 +89,12 @@ class MTGNPClient:
                 pass
 
     def _send_pdu(self, pdu):
+        """
+        name: _send_pdu
+        description: Serializes a PDU to JSON, frames it with a length prefix, and sends it over the socket.
+        @param: pdu (dict): The PDU object to send.
+        """
+
         try:
             payload = json.dumps(pdu).encode('utf-8')
 
@@ -81,6 +108,13 @@ class MTGNPClient:
             if VERBOSE_MODE: print("[client] Failed to send PDU: Socket not connected.")
 
     def _recv_exact(self, num_bytes):
+        """
+        name: _recv_exact
+        description: Reads exactly num_bytes from the socket, returning the data as bytes.
+        @param: num_bytes (int): Number of bytes to read.
+        @return: bytes: The received data, or None if connection closed.
+        """
+
         chunks = []
         bytes_received = 0
 
@@ -94,6 +128,12 @@ class MTGNPClient:
         return b"".join(chunks)
 
     def _recv_pdu(self):
+        """
+        name: _recv_pdu
+        description: Reads a framed PDU from the socket, parses it as JSON, and returns the decoded dictionary.
+        @return: dict or None: The parsed PDU, or None on error or disconnect.
+        """
+
         try:
             header = self._recv_exact(4)
             if header is None:
@@ -114,6 +154,12 @@ class MTGNPClient:
             return None
 
     def connect_and_identify(self):
+        """
+        name: connect_and_identify
+        description: Establishes a TCP connection to the server and sends a PLAYER_READY PDU with the player's deck.
+        @return: bool: True if connection and identification succeeded, False otherwise.
+        """
+
         while self.is_running:
             try:
                 if VERBOSE_MODE: print(f"[client] Attempting to connect to {self.host}:{self.port}...")
@@ -143,6 +189,11 @@ class MTGNPClient:
         return False
 
     def run(self):
+        """
+        name: run
+        description: Main client loop that connects, starts heartbeat, and processes incoming PDUs.
+        """
+
         if not self.connect_and_identify():
             return
 
@@ -162,6 +213,12 @@ class MTGNPClient:
             self.handle_pdu(pdu)
 
     def handle_pdu(self, pdu):
+        """
+        name: handle_pdu
+        description: Dispatches incoming PDUs to appropriate handling logic based on the message type.
+        @param: pdu (dict): The received PDU dictionary.
+        """
+
         p_type = pdu.get("type")
 
         if p_type == "PONG":
