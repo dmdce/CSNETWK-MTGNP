@@ -143,6 +143,7 @@ class MTGNPServer:
         }
 
         for client, _ in self.clients:
+            if VERBOSE_MODE: print(f"Sent update PDU to client {client}: {update}")
             send_pdu(client, update)
             
     def reset_lobby_state(self):
@@ -205,6 +206,7 @@ class MTGNPServer:
                                         "message": f"Player ID '{new_pid}' is already taken.",
                                         "rejected_action": pdu
                                     }
+                                    if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                     send_pdu(conn, error)
                                     continue
                                 else:
@@ -222,6 +224,7 @@ class MTGNPServer:
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
                                 }
+                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
 
@@ -234,6 +237,7 @@ class MTGNPServer:
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
                                 }
+                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
 
@@ -330,6 +334,7 @@ class MTGNPServer:
                         "code": "ROOM_FULL",
                         "message": "Two players are already connected. Please try again later."
                     }
+                    if VERBOSE_MODE: print(f"[server] ERROR: {error_pdu}")
                     send_pdu(conn, error_pdu)
                     conn.close()
                 except:
