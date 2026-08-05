@@ -83,29 +83,27 @@ class GameEngine:
         for p in targets:
             opponent = p2 if p == p1 else p1
 
-            # Build structured per-player state dictionary
-            players_data = {}
-            for pid in self.player_ids:
-                is_viewer = (pid == p)
-                players_data[pid] = {
-                    "life": self.state["life_totals"][pid],
-                    "hand_count": self.state["hand_counts"][pid],
-                    # Direct hand contents are visible ONLY to the recipient player
-                    "hand": copy.deepcopy(self.state["hand"][pid]) if is_viewer else [],
-                    "battlefield": copy.deepcopy(self.state["battlefield"].get(pid, [])),
-                    "graveyard": copy.deepcopy(self.state["graveyard"].get(pid, [])),
-                    "library_count": len(self.state["libraries"][pid])
-                }
-
             visible_state = {
+                "turn": self.state["turn"],
                 "phase": self.state["phase"],
                 "active_player": self.state["active_player"],
-                "turn": self.state["turn"],
-                "priority_holder": self.state.get("priority_holder"),
-                "stack": copy.deepcopy(self.state["stack"]),
-                "land_played_this_turn": self.state.get("land_played_this_turn", False),
-                "players": players_data
+                "life_totals": copy.deepcopy(self.state["life_totals"]),
+                "hand": copy.deepcopy(self.state["hand"][p]),
+                "hand_counts": {opponent: self.state["hand_counts"][opponent]},
+                "library_counts": {
+                    p1: len(self.state["libraries"][p1]),
+                    p2: len(self.state["libraries"][p2])
+                },
+                "battlefield": copy.deepcopy(self.state["battlefield"]),
+                "graveyard": copy.deepcopy(self.state["graveyard"]),
+                "stack": copy.deepcopy(self.state["stack"])
             }
+
+            if "priority_holder" in self.state and self.state["priority_holder"] is not None:
+                visible_state["priority_holder"] = self.state["priority_holder"]
+
+            if "land_played_this_turn" in self.state:
+                visible_state["land_played_this_turn"] = self.state["land_played_this_turn"]
 
             pdu = {
                 "type": "GAME_STATE_UPDATE",
@@ -118,7 +116,7 @@ class GameEngine:
 
             self.server.send_to_player(p, pdu)
 
-        print(f"[engine] Sent state update (Seq: {seq_num}) to players: {targets}")
+        print(f"Broadcasting state to players: {self.state}")
         
     def handle_pdu(self, player_id, pdu):
         pdu_type = pdu.get("type")
