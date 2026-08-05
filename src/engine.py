@@ -206,14 +206,17 @@ class GameEngine:
         self.grant_priority(self.state["active_player"])
         
     def broadcast_phase_transition(self, from_phase, to_phase):
-        self.server.broadcast({
+        pdu = {
             "type": "PHASE_TRANSITION",
             "seq_num": self.server.get_next_sequence_number(),
             "from_phase": from_phase,
             "to_phase": to_phase,
             "active_player": self.state["active_player"],
             "turn": self.state["turn"]
-        })
+        }
+
+        print(f"[engine] Broadcasting PHASE_TRANSITION: {pdu}")
+        self.server.broadcast(pdu)
 
     def _validate_priority_action(self, player_id, pdu):
         seq = pdu.get("seq_num")
@@ -267,13 +270,18 @@ class GameEngine:
             state_changes = self._apply_stack_effect(item, legal_targets)
         if item.item_type == "SPELL" and item.effect.get("kind") != "CREATURE":
             self.state["graveyard"][item.controller].append(item.source)
-        self.server.broadcast({
+
+        stack_resolve_pdu = {
             "type": "STACK_RESOLVE",
             "seq_num": self.server.get_next_sequence_number(),
             "stack_item_id": item.stack_item_id,
             "result": result,
             "state_changes": state_changes
-        })
+        }
+
+        print(f"[engine] Received {stack_resolve_pdu}")
+        self.server.broadcast(stack_resolve_pdu)
+
         if self.check_state_based_actions():
             return
         self.send_personalized_state_update()
@@ -415,30 +423,40 @@ class GameEngine:
         self.state["priority_holder"] = player_id
         seq_num = self.server.get_next_sequence_number()
         self.priority_sequence = seq_num
-        self.server.send_to_player(player_id, {
+
+        priority_grant_pdu = {
             "type": "PRIORITY_GRANT",
             "player_id": player_id,
             "seq_num": seq_num,
             "time_limit_ms": 60000
-        })
+        }
+
+        print(f"[engine] Granting priority to {player_id}: {priority_grant_pdu}")
+        self.server.send_to_player(player_id, priority_grant_pdu)
         
     def send_error(self, player_id, code, message, pdu, seq=None):
-        self.server.send_to_player(player_id, {
+        error_pdu = {
             "type": "ERROR",
             "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
             "code": code,
             "message": message,
             "rejected_action": pdu
-        })
+        }
+
+        print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
+        self.server.send_to_player(player_id, error_pdu)
     
     def regrant_priority(self, player_id):
         if self.state.get("priority_holder") == player_id and self.priority_sequence is not None:
-            self.server.send_to_player(player_id, {
+            regrant_priority_grant_pdu = {
                 "type": "PRIORITY_GRANT",
                 "player_id": player_id,
                 "seq_num": self.priority_sequence,
                 "time_limit_ms": 60000
-            })
+            }
+
+            print(f"[engine] Regranting PRIORITY to player {player_id}: {regrant_priority_grant_pdu}")
+            self.server.send_to_player(player_id, regrant_priority_grant_pdu)
                 
     def check_state_based_actions(self):
         if self.server.phase != "IN_GAME":
@@ -523,14 +541,17 @@ class GameEngine:
             winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
         else:
             winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
-            
-        self.server.broadcast({
+
+        game_over_pdu = {
             "type": "GAME_OVER",
             "seq_num": self.server.get_next_sequence_number(),
             "winner_id": winner_id,
             "loser_id": loser_id,
             "reason": reason
-        })
+        }
+
+        print(f"[engine] Broadcasting GAME_OVER: {game_over_pdu}")
+        self.server.broadcast(game_over_pdu)
         self.server.phase = "LOBBY"
         self.server.reset_lobby_state()
 
