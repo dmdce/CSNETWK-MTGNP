@@ -124,6 +124,7 @@ class MTGNPClient:
                     "player_id": self.player_id,
                     "deck_list": self.deck
                 }
+                if VERBOSE_MODE: print(f"[client] Sending PDU to server: {ready_pdu}")
                 self._send_pdu(ready_pdu)
                 return True
 
