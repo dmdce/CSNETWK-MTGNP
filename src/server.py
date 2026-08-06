@@ -1,3 +1,4 @@
+import logging
 import sys
 import socket
 import threading
@@ -112,7 +113,16 @@ class MTGNPServer:
         @param: player_id (str): The ID of the player who disconnected.
         """
 
-        if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
+        if player_id not in self.players:
+            return
+
+        if self.phase == "LOBBY":
+            logging.debug(f"[server] Player {player_id} disconnected in LOBBY. Removing immediately.")
+            del self.players[player_id]
+            self.broadcast_lobby_status()
+            return
+
+        if self.players[player_id]['status'] == 'DISCONNECTED':
             return
 
         logger.debug(f"Player {player_id} disconnected. Starting 10s timer...")
@@ -123,14 +133,40 @@ class MTGNPServer:
         self.players[player_id]['timer'] = timer
         timer.start()
 
+    # def handle_disconnect(self, player_id):
+    #     """
+    #     name: handle_disconnect
+    #     description: Marks a player as disconnected and starts a 10-second reconnection timer.
+    #     @param: player_id (str): The ID of the player who disconnected.
+    #     """
+    #
+    #     if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
+    #         return
+    #
+    #     logger.debug(f"Player {player_id} disconnected. Starting 10s timer...")
+    #     self.players[player_id]['status'] = 'DISCONNECTED'
+    #
+    #     # Start the reconnect timer
+    #     timer = threading.Timer(10, self.on_reconnect_timeout, [player_id])
+    #     self.players[player_id]['timer'] = timer
+    #     timer.start()
+
     def on_reconnect_timeout(self, player_id):
         """
         name: on_reconnect_timeout
         description: Called when the reconnect timer expires; ends the game with the disconnected player as loser.
         @param: player_id (str): The ID of the player who failed to reconnect.
         """
+        if player_id not in self.players:
+            return
 
         if self.players[player_id]['status'] == 'DISCONNECTED':
+            if self.phase == "LOBBY":
+                logging.debug(f"Player {player_id} was disconnected in LOBBY. Removing.")
+                del self.players[player_id]
+                self.broadcast_lobby_status()
+                return
+
             logger.error(f"FAILURE: {player_id} failed to reconnect. Ending game.")
             with self.lock:
                 self.engine.game_over(loser_id=player_id, reason="DISCONNECT")
@@ -183,7 +219,6 @@ class MTGNPServer:
             client = player_info.get('sock')
             if client is None:
                 continue
-            # logger.debug("Sent update PDU to client {client}: {update}")
             send_pdu(client, update)
             
     def reset_lobby_state(self):
@@ -192,6 +227,9 @@ class MTGNPServer:
         description: Resets the game state and engine, transitions to LOBBY, and broadcasts lobby status.
         """
 
+        for pid, info in self.players.items():
+            if info.get('timer'):
+                info['timer'].cancel()
         self.players = {}
         self.phase = "LOBBY"
         self.engine.reset_state()
@@ -276,9 +314,10 @@ class MTGNPServer:
                             if new_pid in self.players:
                                 existing_player = self.players[new_pid]
 
-                                if existing_player.get('status') == 'CONNECTED' and existing_player.get('sock') != conn:
+                                if existing_player.get('status') == 'CONNECTED':
                                     self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu)
-                                    continue
+                                    logger.error("!!! ERROR AT LINE 279 !!!")
+                                    return
                                 else:
                                     # Reconnect logic: Cancel their timeout timer
                                     logger.debug(f"Player {new_pid} reconnected.")
@@ -316,15 +355,20 @@ class MTGNPServer:
                 traceback.print_exc()
                 break
         
-        with self.lock:
-            if self.phase not in ["LOBBY", "GAME_OVER"]:
-                pid = self.get_player_id_by_socket(conn)
-                if pid:
-                    logger.error(f"Player {pid} disconnected during game.")
-                    self.engine.game_over(loser_id=pid, reason="DISCONNECT")
+        # with self.lock:
+        #     if self.phase not in ["LOBBY", "GAME_OVER"]:
+        #         pid = self.get_player_id_by_socket(conn)
+        #         if pid:
+        #             logger.error(f"Player {pid} disconnected during game.")
+        #             self.engine.game_over(loser_id=pid, reason="DISCONNECT")
+        #
+        # if pid:
+        #     self.handle_disconnect(pid)
 
-        if pid:
-            self.handle_disconnect(pid)
+        with self.lock:
+            pid = self.get_player_id_by_socket(conn)
+            if pid:
+                self.handle_disconnect(pid)
 
         logger.debug(f"Closing connection for {addr}...")
         conn.close()
@@ -413,7 +457,7 @@ class MTGNPServer:
         if rejected_action is not None:
             error_pdu["rejected_action"] = rejected_action
 
-        logger.debug(f"Sending ERROR to {player_id}: {error_pdu}")
+        logger.error(f"Sending ERROR to {player_id}: {error_pdu}")
 
         try:
             send_pdu(self.players[player_id]['sock'], error_pdu)
