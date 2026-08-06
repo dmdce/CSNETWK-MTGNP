@@ -461,7 +461,7 @@ class MTGNPServer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Server application")
-    parser.add_argument('--verbose', action='store_true', help="Enable verbose mode. (DEBUG, INFO, WARNING)")
+    parser.add_argument('--verbose', action='store_true', help="Enable verbose mode. Includes DEBUG, INFO, WARNING")
     args = parser.parse_args()
 
     setup_logging(verbose=args.verbose)

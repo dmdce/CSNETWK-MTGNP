@@ -1,7 +1,9 @@
 import copy
 import random
 from turn_manager import GameRuleError, PRIORITY_STEPS, TurnManager
+from console_logger import get_logger
 
+logger = get_logger(__name__)
 
 # Minimal fixed-catalog effects owned jointly by Dev 3/4. Unknown cards are
 # still represented on the stack but resolve without a special effect.
@@ -612,18 +614,6 @@ class GameEngine:
 
         print(f"[engine] Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
-        
-    # def send_error(self, player_id, code, message, pdu, seq=None):
-    #     error_pdu = {
-    #         "type": "ERROR",
-    #         "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
-    #         "code": code,
-    #         "message": message,
-    #         "rejected_action": pdu
-    #     }
-    #
-    #     print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
-    #     self.server.send_to_player(player_id, error_pdu)
     
     def regrant_priority(self, player_id):
         """

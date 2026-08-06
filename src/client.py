@@ -277,7 +277,7 @@ class MTGNPClient:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Client application")
-    parser.add_argument('--verbose', action='store_true', help="Enable verbose mode. (DEBUG, INFO, WARNING)")
+    parser.add_argument('--verbose', action='store_true', help="Enable verbose mode. Includes DEBUG, INFO, WARNING")
     parser.add_argument('--name', type=str, default='anonymous', help="Custom name for the client")
     args = parser.parse_args()
 
