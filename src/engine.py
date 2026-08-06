@@ -462,9 +462,16 @@ class GameEngine:
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
         except GameRuleError:
-            # BEGIN_COMBAT is the explicit hand-off to Dev 4's combat machine.
+            if self.state["phase"] == "BEGIN_COMBAT":
+                self.transition_to_declare_attackers()
             return
+
+        if to_phase == "BEGIN_COMBAT":
+            self.handle_begin_combat()
+            return
+
         self.broadcast_phase_transition(from_phase, to_phase)
+
         if to_phase == "CLEANUP":
             self.send_personalized_state_update()
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
@@ -473,6 +480,35 @@ class GameEngine:
         self.send_personalized_state_update()
         if to_phase in PRIORITY_STEPS:
             self.grant_priority(self.state["active_player"])
+
+    def handle_begin_combat(self):
+        """Creating Beginning of Combat step setup:
+
+        mutates state, evaluates SBAs, notifies clients, and grants priority.
+        """
+
+        from_phase, to_phase = self.turn_manager.begin_combat_step()
+
+        if self.check_state_based_actions():
+            return
+        self.broadcast_phase_transition(from_phase, to_phase)
+        self.send_personalized_state_update()
+
+        self.grant_priority(self.state["active_player"])
+
+    def transition_to_declare_attackers(self):
+        """Closes the BEGIN_COMBAT priority window and passes execution
+
+        to the Declare Attackers step (Dev 4 boundary).
+        """
+        from_phase = self.state["phase"]
+        to_phase = "DECLARE_ATTACKERS"
+
+        self.state["phase"] = to_phase
+        self.state["priority_holder"] = None
+
+        self.broadcast_phase_transition(from_phase, to_phase)
+        self.send_personalized_state_update()
 
     @staticmethod
     def _effect_for(card_id):

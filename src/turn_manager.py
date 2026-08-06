@@ -114,6 +114,36 @@ class TurnManager:
             self.draw_card(self.active_player)
         return old, new
 
+    def begin_combat_step(self):
+        """Mutates state for entering BEGIN_COMBAT and collects phase triggers.
+
+        Resets pass count, clears floating mana, and queues APNAP combat triggers.
+        Assumes phase string was already set to "BEGIN_COMBAT" by advance_priority_step().
+        """
+        self.consecutive_passes = 0
+        self.state["priority_holder"] = None
+
+        if "mana_pool" in self.state:
+            for pid in self.player_ids:
+                self.state["mana_pool"][pid] = {"W": 0, "U": 0, "B": 0, "R": 0, "G": 0, "C": 0}
+
+        all_permanents = []
+        for zone in self.state["battlefield"].values():
+            all_permanents.extend([p for p in zone if isinstance(p, dict)])
+
+        raw_triggers = self.make_triggers("BEGIN_COMBAT", all_permanents)
+        ordered_triggers = self.apnap_order(raw_triggers)
+
+        for trg in ordered_triggers:
+            self.push(
+                item_type="TRIGGER",
+                source=trg["source_id"],
+                controller=trg["controller_id"],
+                effect=trg.get("effect", {})
+            )
+
+        return "PRECOMBAT_MAIN", "BEGIN_COMBAT"
+
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
         if not library:

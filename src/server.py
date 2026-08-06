@@ -246,14 +246,14 @@ class MTGNPServer:
 
                                 if existing_player.get('status') == 'CONNECTED':
                                     self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu, self.get_next_sequence_number())
-                                    # error = {
-                                    #     "type": "ERROR",
-                                    #     "seq_num": self.get_next_sequence_number(),
-                                    #     "code": "DUPLICATE_ID",
-                                    #     "message": f"Player ID '{new_pid}' is already taken.",
-                                    #     "rejected_action": pdu
-                                    # }
-                                    # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                    error = {
+                                        "type": "ERROR",
+                                        "seq_num": self.get_next_sequence_number(),
+                                        "code": "DUPLICATE_ID",
+                                        "message": f"Player ID '{new_pid}' is already taken.",
+                                        "rejected_action": pdu
+                                    }
+                                    if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                     # send_pdu(conn, error)
                                     continue
                                 else:
