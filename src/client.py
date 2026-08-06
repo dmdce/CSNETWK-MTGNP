@@ -38,6 +38,15 @@ class MTGNPClient:
                     "phantasmal_bear_001", "phantasmal_bear_002", "phantasmal_bear_003", "phantasmal_bear_004",
                     "ponder_001", "ponder_002", "ponder_003", "ponder_004",
                     "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
+        ###
+        # Sequence Tracking
+        self.last_server_seq = 0  # Tracks server seq_num to echo in MULLIGAN_CHOICE
+
+        ###
+        # Game & Mulligan State
+        self.mulligan_count = 0  # Number of mulligans taken in current game
+        self.current_hand = []  # Local copy of current hand
+        self.current_phase = "LOBBY"
 
     def _start_heartbeat(self):
         """
@@ -71,6 +80,99 @@ class MTGNPClient:
 
                 logging.debug(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
                 self._send_pdu(ping_pdu)
+    ###
+    def _start_input_thread(self):
+        """Starts background thread to capture CLI input continuously."""
+        input_thread = threading.Thread(target=self._input_loop, daemon=True)
+        input_thread.start()
+    ###
+    def _input_loop(self):
+        """Listens for terminal input line by line."""
+        while self.is_running:
+            try:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                cmd_str = line.strip()
+                if cmd_str:
+                    self._handle_user_command(cmd_str)
+            except Exception as e:
+                logger.error(f"Input thread error: {e}")
+                break
+    ###
+    def _handle_user_command(self, cmd_str):
+        """Parses console command inputs for Lobby and Mulligan phase actions."""
+        tokens = cmd_str.strip().split()
+        cmd = tokens[0].lower() if tokens else ""
+
+        # --- MULLIGAN ACTIONS ---
+        if self.current_phase == "MULLIGAN":
+            if cmd in ["mulligan", "mull", "m"]:
+                self.mulligan_count += 1
+                pdu = {
+                    "type": "MULLIGAN_CHOICE",
+                    "seq_num": self.last_server_seq,  # Echoes server's GAME_STATE_UPDATE seq_num
+                    "keep": False,
+                    "cards_to_bottom": []
+                }
+                print(f"[ACTION] Requesting redraw for Mulligan #{self.mulligan_count}...")
+                self._send_pdu(pdu)
+
+            elif cmd in ["keep", "k"]:
+                provided_cards = tokens[1:]
+
+                # Validate count against London Mulligan rules
+                if len(provided_cards) != self.mulligan_count:
+                    print(
+                        f"❌ Error: You mulliganed {self.mulligan_count} time(s). You must supply exactly {self.mulligan_count} card ID(s) to bottom.")
+                    print(f"   Usage example: keep {' '.join(self.current_hand[:self.mulligan_count])}")
+                    return
+
+                # Validate provided cards exist in current hand
+                temp_hand = list(self.current_hand)
+                for card_id in provided_cards:
+                    if card_id not in temp_hand:
+                        print(f"❌ Error: Card '{card_id}' is not in your current hand.")
+                        return
+                    temp_hand.remove(card_id)
+
+                pdu = {
+                    "type": "MULLIGAN_CHOICE",
+                    "seq_num": self.last_server_seq,  # Echoes server's GAME_STATE_UPDATE seq_num
+                    "keep": True,
+                    "cards_to_bottom": provided_cards
+                }
+                print(f"[ACTION] Keeping hand. Cards sent to bottom: {provided_cards}")
+                self._send_pdu(pdu)
+
+            elif cmd == "help":
+                print("\n--- MULLIGAN COMMANDS ---")
+                print("  keep <card_ids...> / k <card_ids...> : Keep hand (pass required card IDs to bottom)")
+                print("  mulligan / m                          : Redraw a new hand\n")
+
+            else:
+                print(f"Unknown command for Mulligan Phase. Type 'keep' or 'mulligan'.")
+
+        # --- LOBBY ACTIONS ---
+        elif self.current_phase == "LOBBY":
+            if cmd == "ready":
+                self.seq_num += 1
+                ready_pdu = {
+                    "type": "PLAYER_READY",
+                    "seq_num": self.seq_num,
+                    "player_id": self.player_id,
+                    "deck_list": self.deck
+                }
+                print("[ACTION] Re-sending PLAYER_READY...")
+                self._send_pdu(ready_pdu)
+            elif cmd == "help":
+                print("\n--- LOBBY COMMANDS ---")
+                print("  ready : Send/Re-send player ready status to server\n")
+            else:
+                print("In lobby. Waiting for match setup... (type 'ready' to re-send readiness)")
+
+        else:
+            print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}")
 
     def _on_pong_timeout(self):
         """
@@ -174,6 +276,9 @@ class MTGNPClient:
 
                 logger.debug(f"Connected. Sending PLAYER_READY for '{self.player_id}'...")
                 self.seq_num += 1
+                ###
+                self.mulligan_count = 0
+
                 ready_pdu = {
                     "type": "PLAYER_READY",
                     "seq_num": self.seq_num,
@@ -199,6 +304,8 @@ class MTGNPClient:
             return
 
         self._start_heartbeat()
+        ###
+        self._start_input_thread()
 
         while self.is_running:
             pdu = self._recv_pdu()
@@ -221,6 +328,10 @@ class MTGNPClient:
         """
 
         p_type = pdu.get("type")
+
+        ###
+        if "seq_num" in pdu:
+            self.last_server_seq = pdu["seq_num"]
 
         if p_type == "PONG":
             # timestamp = pdu.get("timestamp")
@@ -249,6 +360,19 @@ class MTGNPClient:
                 print(f"Players Ready: {state.get('players_ready', 0)}")
                 if state.get('waiting_for'):
                     print(f"Waiting for: {state.get('waiting_for')}")
+
+            ###
+            elif self.current_phase == "MULLIGAN":
+                print(f"================ MULLIGAN PHASE ================")
+                print(f"Your Hand ({len(self.current_hand)} cards): {self.current_hand}")
+                print(f"Times Mulliganed: {self.mulligan_count}")
+                if self.mulligan_count > 0:
+                    print(
+                        f"👉 Enter command: 'keep <card_id1> ...' ({self.mulligan_count} card(s) to bottom) OR 'mulligan'")
+                else:
+                    print(f"👉 Enter command: 'keep' OR 'mulligan'")
+                print(f"================================================")
+
             else:
                 print(f"Turn: {state.get('turn')} | Active Player: {state.get('active_player')}")
                 print(f"Life Totals: {state.get('life_totals', {})}")
@@ -263,6 +387,9 @@ class MTGNPClient:
 
         elif p_type == "ERROR":
             logging.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
+            ###
+            if pdu.get('code') == "ILLEGAL_ACTION":
+                print("❌ Action rejected by server. Please try again.")
 
         elif p_type == "GAME_OVER":
             print(f"\n--- GAME OVER ---")
