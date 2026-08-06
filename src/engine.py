@@ -109,6 +109,7 @@ class GameEngine:
                 "turn": self.state["turn"],
                 "phase": self.state["phase"],
                 "active_player": self.state["active_player"],
+                "priority_holder": self.state["priority_holder"],
                 "life_totals": copy.deepcopy(self.state["life_totals"]),
                 "hand": copy.deepcopy(self.state["hand"][p]),
                 "hand_counts": {opponent: self.state["hand_counts"][opponent]},
@@ -120,9 +121,6 @@ class GameEngine:
                 "graveyard": copy.deepcopy(self.state["graveyard"]),
                 "stack": copy.deepcopy(self.state["stack"])
             }
-
-            if "priority_holder" in self.state and self.state["priority_holder"] is not None:
-                visible_state["priority_holder"] = self.state["priority_holder"]
 
             if "land_played_this_turn" in self.state:
                 visible_state["land_played_this_turn"] = self.state["land_played_this_turn"]
@@ -473,6 +471,7 @@ class GameEngine:
         self.broadcast_phase_transition(from_phase, to_phase)
 
         if to_phase == "CLEANUP":
+            self.state["priority_holder"] = None
             self.send_personalized_state_update()
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
                 self.end_turn()
@@ -705,6 +704,7 @@ class GameEngine:
             self.broadcast_phase_transition(from_phase, to_phase)
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
+
         self.grant_priority(self.state["active_player"])
     
     def game_over(self, loser_id, reason):
