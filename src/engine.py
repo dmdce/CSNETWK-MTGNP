@@ -712,7 +712,7 @@ class GameEngine:
         name: game_over
         description: Broadcasts a GAME_OVER PDU, resets the server to LOBBY state, and clears the game engine.
         @param: loser_id (str): The ID of the losing player.
-        @param: reason (str): The reason for game over (LIFE_ZERO, CONCEDE, DISCONNECT).
+        @param: reason (str): The reason for game over (LIFE_ZERO, DECK_EMPTY, CONCEDE, DISCONNECT).
         """
 
         if not self.player_ids:

@@ -255,7 +255,6 @@ class MTGNPServer:
 
                             invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
                             if not (1 <= len(deck) <= 50) or invalid_cards:
-                                # self.send_error(new_pid, "ILLEGAL_DECK", "Invalid deck size, or contains illegal cards.", pdu, self.get_next_sequence_number())
                                 error = {
                                     "type": "ERROR",
                                     "seq_num": self.get_next_sequence_number(),
@@ -272,16 +271,7 @@ class MTGNPServer:
                                 existing_player = self.players[new_pid]
 
                                 if existing_player.get('status') == 'CONNECTED':
-                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu, self.get_next_sequence_number())
-                                    error = {
-                                        "type": "ERROR",
-                                        "seq_num": self.get_next_sequence_number(),
-                                        "code": "DUPLICATE_ID",
-                                        "message": f"Player ID '{new_pid}' is already taken.",
-                                        "rejected_action": pdu
-                                    }
-                                    if VERBOSE_MODE: print(f"[server] ERROR: {error}")
-                                    # send_pdu(conn, error)
+                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu)
                                     continue
                                 else:
                                     # Reconnect logic: Cancel their timeout timer
