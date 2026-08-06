@@ -1,0 +1,17 @@
+{"timestamp": 1786002531.516, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "Rozette", "life_totals": {"Rozette": 20, "DARRYL": 20}, "hand": ["prodigal_sorcerer_001", "phantasmal_bear_004", "mountain_006", "ponder_003", "lightning_bolt_001", "mountain_007", "monastery_swiftspear_002"], "hand_counts": {"DARRYL": 7}, "library_counts": {"Rozette": 43, "DARRYL": 43}, "battlefield": {"Rozette": [], "DARRYL": []}, "graveyard": {"Rozette": [], "DARRYL": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786002531.518, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "Rozette", "life_totals": {"Rozette": 20, "DARRYL": 20}, "hand": ["monastery_swiftspear_004", "prodigal_sorcerer_001", "counterspell_002", "island_003", "mountain_002", "island_010", "mountain_004"], "hand_counts": {"Rozette": 7}, "library_counts": {"Rozette": 43, "DARRYL": 43}, "battlefield": {"Rozette": [], "DARRYL": []}, "graveyard": {"Rozette": [], "DARRYL": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786002533.654, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 2, "timestamp": 1786002533.6531413}}
+{"timestamp": 1786002561.518, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 2, "timestamp": 1786002561.5175686}}
+{"timestamp": 1786002563.655, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 3, "timestamp": 1786002563.6542265}}
+{"timestamp": 1786002591.52, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 3, "timestamp": 1786002591.518738}}
+{"timestamp": 1786002593.656, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 4, "timestamp": 1786002593.6555197}}
+{"timestamp": 1786002621.554, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 4, "timestamp": 1786002621.5522287}}
+{"timestamp": 1786002623.658, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 5, "timestamp": 1786002623.6567683}}
+{"timestamp": 1786002651.556, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 5, "timestamp": 1786002651.5544138}}
+{"timestamp": 1786002653.659, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 6, "timestamp": 1786002653.6576173}}
+{"timestamp": 1786002681.557, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 6, "timestamp": 1786002681.5559235}}
+{"timestamp": 1786002683.66, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786002683.659052}}
+{"timestamp": 1786002711.56, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786002711.557766}}
+{"timestamp": 1786002713.662, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786002713.6606085}}
+{"timestamp": 1786002741.562, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786002741.5604355}}
+{"timestamp": 1786002743.665, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786002743.663515}}

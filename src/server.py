@@ -308,8 +308,6 @@ class MTGNPServer:
             except Exception:
                 if VERBOSE_MODE: print(f"[server] Exception in handle_client for {addr} (pid={pid}):")
                 traceback.print_exc()
-                if pid:
-                    self.handle_disconnect(pid)
                 break
         
         with self.lock:

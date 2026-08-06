@@ -136,7 +136,7 @@ class GameEngine:
 
             self.server.send_to_player(p, pdu)
 
-        print(f"Broadcasting state to players: {self.state}")
+            print(f"[engine] Sent state update to {p}: {visible_state}")
         
     def handle_pdu(self, player_id, pdu):
         """
@@ -405,6 +405,10 @@ class GameEngine:
             return
         try:
             self.turn_manager.play_land(player_id, pdu.get("card_id"))
+            bf = self.state["battlefield"][player_id]
+            if pdu.get("card_id") in bf:
+                idx = bf.index(pdu.get("card_id"))
+                bf[idx] = {"id": pdu.get("card_id"), "tapped": False}
         except GameRuleError as error:
             self.server.send_error(player_id, error.code, error.message, pdu)
             return
@@ -563,6 +567,12 @@ class GameEngine:
                 "power": effect["power"],
                 "toughness": effect["toughness"],
                 "summoning_sick": not effect.get("haste", False),
+            })
+            changes.append({"change_type": "ENTER_BATTLEFIELD", "target": item.source})
+        elif effect.get("kind") in {"ENCHANTMENT", "ARTIFACT"}:
+            self.state["battlefield"][item.controller].append({
+                "id": item.source,
+                "tapped": False,
             })
             changes.append({"change_type": "ENTER_BATTLEFIELD", "target": item.source})
         return changes
