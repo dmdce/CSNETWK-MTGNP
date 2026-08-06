@@ -4,10 +4,13 @@ import threading
 import traceback
 from protocol import send_pdu, recv_pdu, InvalidPduError
 from engine import GameEngine
+from logger import log_pdu, clear_log
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
 VERBOSE_MODE = False
+
+clear_log("server_stream.jsonl")
 
 # LEGAL_CARDS = {"Mountain", "Forest", "Plains", "Island", "Swamp", "Lightning Bolt", "Shock", 
 #                "Lava Spike", "Flame Slash", "Searing Spear", "Skullcrack", "Rift Bolt", 
@@ -452,6 +455,7 @@ class MTGNPServer:
 
             # If room is available, handle client
             threading.Thread(target=self.handle_client, args=(conn, addr), daemon=True).start()
+
 
 if __name__ == "__main__":
     if "verbose" in sys.argv: VERBOSE_MODE = True
