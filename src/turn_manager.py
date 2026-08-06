@@ -148,7 +148,7 @@ class TurnManager:
         library = self.state["libraries"][player_id]
         if not library:
             # TODO: Route to a behavior that triggers the DECK_EMPTY state for the player
-            return False
+            raise GameRuleError("DECK_EMPTY", "The player has no cards left in their library.")
         self.state["hand"][player_id].append(library.pop())
         self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
         return True
