@@ -165,7 +165,7 @@ class GameEngine:
                 case "DISCARD":
                     self.handle_discard(player_id, pdu)
                 case "CONCEDE":
-                    # self.game_over(loser_id=player_id, reason="CONCEDE")
+                    self.game_over(loser_id=player_id, reason="CONCEDE")
                     self.handle_concede(player_id, pdu)
                     
     def handle_mulligan(self, player_id, pdu):

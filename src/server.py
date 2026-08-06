@@ -177,7 +177,12 @@ class MTGNPServer:
             }
         }
 
-        for client, _ in self.clients:
+        # for client, _ in self.clients:
+        #     send_pdu(client, update)
+        for player_info in self.players.values():
+            client = player_info.get('sock')
+            if client is None:
+                continue
             # logger.debug("Sent update PDU to client {client}: {update}")
             send_pdu(client, update)
             
@@ -271,7 +276,7 @@ class MTGNPServer:
                             if new_pid in self.players:
                                 existing_player = self.players[new_pid]
 
-                                if existing_player.get('status') == 'CONNECTED':
+                                if existing_player.get('status') == 'CONNECTED' and existing_player.get('sock') != conn:
                                     self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu)
                                     continue
                                 else:
@@ -386,8 +391,16 @@ class MTGNPServer:
         @param seq (int, optional): Sequence number to use. If None, use server's next sequence number.
         """
 
-        if player_id not in self.players or self.players[player_id].get('status') != 'CONNECTED':
-            return # Client is already gone
+        info = self.players.get(player_id)
+        if info is None:
+            return  # Player not found, cannot send error
+        
+        status = info.get('status', 'CONNECTED')
+        if status != 'CONNECTED' and status != 'DISCONNECTED':
+            return  # Player is not in a state to receive messages
+        if info.get('sock') is None:
+            return  # Player has no socket to send to
+        
 
         seq_num = seq if seq is not None else self.get_next_sequence_number()
 
