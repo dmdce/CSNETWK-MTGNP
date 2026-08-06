@@ -254,7 +254,7 @@ class MTGNPServer:
                                     #     "rejected_action": pdu
                                     # }
                                     # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
-                                    send_pdu(conn, error)
+                                    # send_pdu(conn, error)
                                     continue
                                 else:
                                     # Reconnect logic: Cancel their timeout timer
