@@ -313,7 +313,7 @@ class MTGNPServer:
                     else:
                         current_pid = self.get_player_id_by_socket(conn)
                         if current_pid:
-                            self.engine.handle_pdu(pid, pdu)
+                            self.engine.handle_pdu(current_pid, pdu)
                             
             except Exception:
                 if VERBOSE_MODE: print(f"[server] Exception in handle_client for {addr} (pid={pid}):")
