@@ -2,9 +2,11 @@ import sys
 import socket
 import threading
 import traceback
+import argparse
 from protocol import send_pdu, recv_pdu, InvalidPduError
 from engine import GameEngine
 from logger import log_pdu, clear_log
+from console_logger import setup_logging, get_logger
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
@@ -114,7 +116,7 @@ class MTGNPServer:
         if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
             return
 
-        if VERBOSE_MODE: print(f"[server] Player {player_id} disconnected. Starting 10s timer...")
+        logger.debug(f"Player {player_id} disconnected. Starting 10s timer...")
         self.players[player_id]['status'] = 'DISCONNECTED'
 
         # Start the reconnect timer
@@ -130,7 +132,7 @@ class MTGNPServer:
         """
 
         if self.players[player_id]['status'] == 'DISCONNECTED':
-            if VERBOSE_MODE: print(f"[server] FAILURE: {player_id} failed to reconnect. Ending game.")
+            logger.error(f"FAILURE: {player_id} failed to reconnect. Ending game.")
             with self.lock:
                 self.engine.game_over(loser_id=player_id, reason="DISCONNECT")
 
@@ -144,7 +146,7 @@ class MTGNPServer:
         """
 
         if player_id in self.players and self.players[player_id]['status'] == 'DISCONNECTED':
-            if VERBOSE_MODE: print(f"[server] Player {player_id} has reconnected! Cancelling the timeout.")
+            logger.debug(f"Player {player_id} has reconnected! Cancelling the timeout.")
 
             # Cancel the timeout timer
             if self.players[player_id]['timer']:
@@ -201,13 +203,13 @@ class MTGNPServer:
 
         pid = None
 
-        if VERBOSE_MODE: print("[server] Connected to", addr)
+        logger.debug(f"Connected to {addr}")
 
         while True:
             try:
                 pdu = recv_pdu(conn)
             except InvalidPduError as e:
-                if VERBOSE_MODE: print(f"[server] ERROR: Malformed PDU from {addr} (pid={pid}): {e}")
+                logger.error(f"ERROR: Malformed PDU from {addr} (pid={pid}): {e}")
                 try:
                     send_pdu(conn, {
                         "type": "ERROR",
@@ -249,7 +251,7 @@ class MTGNPServer:
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
                                 }
-                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                logger.error(f"ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
 
@@ -262,7 +264,7 @@ class MTGNPServer:
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
                                 }
-                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                logger.error(f"ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
                             
@@ -275,13 +277,13 @@ class MTGNPServer:
                                     continue
                                 else:
                                     # Reconnect logic: Cancel their timeout timer
-                                    if VERBOSE_MODE: print(f"[server] Player {new_pid} reconnected.")
+                                    logger.debug(f"Player {new_pid} reconnected.")
                                     if existing_player.get('timer'):
                                         existing_player['timer'].cancel()
 
                             # Step 2: Registration
                             pid = new_pid
-                            if VERBOSE_MODE: print(f"[server] Player '{pid}' is ready!")
+                            logger.debug(f"Player '{pid}' is ready!")
                             self.players[pid] = {
                                 "deck": deck,
                                 "sock": conn,
@@ -295,7 +297,7 @@ class MTGNPServer:
 
                             # Step 4: Check if GAME_SETUP can proceed
                             if len(self.players) == 2:
-                                if VERBOSE_MODE: print("[server] Both players are ready. Moving to GAME_SETUP...")
+                                logger.debug("Both players are ready. Moving to GAME_SETUP...")
                                 self.phase = "GAME_SETUP"
                                 self.engine.start_game_setup()
                     elif self.phase == "GAME_OVER":
@@ -306,7 +308,7 @@ class MTGNPServer:
                             self.engine.handle_pdu(current_pid, pdu)
                             
             except Exception:
-                if VERBOSE_MODE: print(f"[server] Exception in handle_client for {addr} (pid={pid}):")
+                logger.error(f"Exception in handle_client for {addr} (pid={pid}):")
                 traceback.print_exc()
                 break
         
@@ -314,13 +316,13 @@ class MTGNPServer:
             if self.phase not in ["LOBBY", "GAME_OVER"]:
                 pid = self.get_player_id_by_socket(conn)
                 if pid:
-                    if VERBOSE_MODE: print(f"[server] Player {pid} disconnected during game.")
+                    logger.error(f"Player {pid} disconnected during game.")
                     self.engine.game_over(loser_id=pid, reason="DISCONNECT")
 
         if pid:
             self.handle_disconnect(pid)
 
-        if VERBOSE_MODE: print(f"[server] Closing connection for {addr}...")
+        logger.debug(f"Closing connection for {addr}...")
         conn.close()
         
     def get_player_id_by_socket(self, sock):
@@ -399,7 +401,7 @@ class MTGNPServer:
         if rejected_action is not None:
             error_pdu["rejected_action"] = rejected_action
 
-        if VERBOSE_MODE: print(f"[server] Sending ERROR to {player_id}: {error_pdu}")
+        logger.debug(f"Sending ERROR to {player_id}: {error_pdu}")
 
         try:
             send_pdu(self.players[player_id]['sock'], error_pdu)
@@ -417,7 +419,7 @@ class MTGNPServer:
         server.bind((self.host, self.port))
         server.listen(5) # Backlog
 
-        if VERBOSE_MODE: print(f"[server] Listening on {self.host}:{self.port}...")
+        logger.debug(f"Listening on {self.host}:{self.port}...")
 
         while True:
             conn, addr = server.accept()
@@ -426,7 +428,7 @@ class MTGNPServer:
             active_players = [player for player in self.players.values() if player['status'] == 'CONNECTED']
 
             if len(active_players) >= self.max_players:
-                if VERBOSE_MODE: print(f"[server] ERROR: Connection attempt from {addr} refused: Game is full.")
+                logger.error(f"ERROR: Connection attempt from {addr} refused: Game is full.")
                 try:
                     error_pdu = {
                         "type": "ERROR",
@@ -434,7 +436,7 @@ class MTGNPServer:
                         "code": "ROOM_FULL",
                         "message": "Two players are already connected. Please try again later."
                     }
-                    if VERBOSE_MODE: print(f"[server] ERROR: {error_pdu}")
+                    logger.error(f"ERROR: {error_pdu}")
                     send_pdu(conn, error_pdu)
                     conn.close()
                 except:
@@ -446,16 +448,21 @@ class MTGNPServer:
 
 
 if __name__ == "__main__":
-    if "verbose" in sys.argv: VERBOSE_MODE = True
+    parser = argparse.ArgumentParser(description="Server application")
+    parser.add_argument('--verbose', action='store_true', help="Enable verbose mode. (DEBUG, INFO, WARNING)")
+    args = parser.parse_args()
 
-    if VERBOSE_MODE:
-        print("[server] Verbose mode active!\n")
+    setup_logging(verbose=args.verbose)
+    logger = get_logger(__name__)
+
+    if args.verbose:
+        logger.info("[server] Verbose mode active!\n")
     else:
-        print("NOTE: Verbose mode is not active. Debug lines are hidden. Include 'verbose' as a flag to activate verbose mode.\n")
+        print("NOTE: Verbose mode is not active. Debug lines are hidden. Include '--verbose' as a flag to activate verbose mode.\n")
         
     server = MTGNPServer()
 
     try:
         server.start()
     except KeyboardInterrupt:
-        if VERBOSE_MODE: print("\n[server] Detected force stop. Exiting...")
+        logger.error("Detected force stop. Exiting...")
