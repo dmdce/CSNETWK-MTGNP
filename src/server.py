@@ -10,7 +10,6 @@ from console_logger import setup_logging, get_logger
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
-VERBOSE_MODE = False
 
 clear_log("server_stream.jsonl")
 
@@ -179,7 +178,7 @@ class MTGNPServer:
         }
 
         for client, _ in self.clients:
-            if VERBOSE_MODE: print(f"Sent update PDU to client {client}: {update}")
+            # logger.debug("Sent update PDU to client {client}: {update}")
             send_pdu(client, update)
             
     def reset_lobby_state(self):
@@ -456,7 +455,7 @@ if __name__ == "__main__":
     logger = get_logger(__name__)
 
     if args.verbose:
-        logger.info("[server] Verbose mode active!\n")
+        logger.info("Verbose mode active!\n")
     else:
         print("NOTE: Verbose mode is not active. Debug lines are hidden. Include '--verbose' as a flag to activate verbose mode.\n")
         
