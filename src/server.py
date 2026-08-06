@@ -240,6 +240,33 @@ class MTGNPServer:
                             new_pid = pdu.get('player_id')
                             deck = pdu.get('deck_list', [])
 
+                            # Step 1: Validation
+                            if not new_pid:
+                                error = {
+                                    "type": "ERROR",
+                                    "seq_num": self.get_next_sequence_number(),
+                                    "code": "ILLEGAL_ACTION",
+                                    "message": "player_id must be a non-empty string.",
+                                    "rejected_action": pdu
+                                }
+                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                send_pdu(conn, error)
+                                continue
+
+                            invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
+                            if not (1 <= len(deck) <= 50) or invalid_cards:
+                                # self.send_error(new_pid, "ILLEGAL_DECK", "Invalid deck size, or contains illegal cards.", pdu, self.get_next_sequence_number())
+                                error = {
+                                    "type": "ERROR",
+                                    "seq_num": self.get_next_sequence_number(),
+                                    "code": "ILLEGAL_DECK",
+                                    "message": "Invalid deck size, or contains illegal cards.",
+                                    "rejected_action": pdu
+                                }
+                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                send_pdu(conn, error)
+                                continue
+                            
                             # Check if pid is RECONNECT or DUPLICATE
                             if new_pid in self.players:
                                 existing_player = self.players[new_pid]
@@ -261,33 +288,6 @@ class MTGNPServer:
                                     if VERBOSE_MODE: print(f"[server] Player {new_pid} reconnected.")
                                     if existing_player.get('timer'):
                                         existing_player['timer'].cancel()
-
-                            # Step 1: Validation
-                            if not new_pid:
-                                error = {
-                                    "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_number(),
-                                    "code": "ILLEGAL_ACTION",
-                                    "message": "player_id must be a non-empty string.",
-                                    "rejected_action": pdu
-                                }
-                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
-                                send_pdu(conn, error)
-                                continue
-
-                            invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
-                            if not (1 <= len(deck) <= 50) or invalid_cards:
-                                self.send_error(new_pid, "ILLEGAL_DECK", "Invalid deck size, or contains illegal cards.", pdu, self.get_next_sequence_number())
-                                # error = {
-                                #     "type": "ERROR",
-                                #     "seq_num": self.get_next_sequence_number(),
-                                #     "code": "ILLEGAL_DECK",
-                                #     "message": "Invalid deck size, or contains illegal cards.",
-                                #     "rejected_action": pdu
-                                # }
-                                # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
-                                # send_pdu(conn, error)
-                                continue
 
                             # Step 2: Registration
                             pid = new_pid
