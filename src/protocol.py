@@ -1,5 +1,6 @@
 import json
 import struct
+from logger import log_pdu
 
 MAX_PDU_SIZE = 65535
 
@@ -7,8 +8,12 @@ class InvalidPduError(Exception):
     # Raised when received bytes cannot be decoded as UTF-8 or parsed as JSON
     pass
 
-def send_pdu(sock, pdu):
-    # Frame JSON PDU with 4-byte big-endian length prefix
+def send_pdu(sock, pdu, filename="server_stream.jsonl"):
+    """Serializes a PDU, logs it, and sends it with a 4-byte length prefix."""
+    # 1. Log outgoing PDU
+    log_pdu(pdu, direction="SENT", filename=filename)
+
+    # 2. Serialize and Frame
     payload = json.dumps(pdu).encode('utf-8')
 
     if len(payload) > MAX_PDU_SIZE:

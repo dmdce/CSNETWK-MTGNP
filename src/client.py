@@ -12,6 +12,12 @@ VERBOSE_MODE = False
 
 class MTGNPClient:
     def __init__(self, player_id):
+        """
+        name: __init__
+        description: Initializes the MTGNP client with the given player ID and sets up default attributes.
+        @param: player_id (str): Unique identifier for this client player.
+        """
+
         self.player_id = player_id
         self.host = HOST
         self.port = PORT
@@ -20,13 +26,32 @@ class MTGNPClient:
         self.last_ping_seq = -1
         self.pong_timer = None
         self.is_running = True
-        self.deck = ["mountain_001", "shock_001", "goblin_guide_001"] # Temporary
+        self.deck = ["counterspell_001", "counterspell_002", "counterspell_003", "counterspell_004",
+                    "goblin_guide_001", "goblin_guide_002", "goblin_guide_003", "goblin_guide_004",
+                    "island_001", "island_002", "island_003", "island_004", "island_005", "island_006", "island_007", "island_008", "island_009", "island_010",
+                    "lightning_bolt_001", "lightning_bolt_002", "lightning_bolt_003", "lightning_bolt_004",
+                    "mana_leak_001", "mana_leak_002", "mana_leak_003", "mana_leak_004",
+                    "monastery_swiftspear_001", "monastery_swiftspear_002", "monastery_swiftspear_003", "monastery_swiftspear_004",
+                    "mountain_001", "mountain_002", "mountain_003", "mountain_004", "mountain_005", "mountain_006", "mountain_007", "mountain_008", "mountain_009", "mountain_010",
+                    "phantasmal_bear_001", "phantasmal_bear_002", "phantasmal_bear_003", "phantasmal_bear_004",
+                    "ponder_001", "ponder_002", "ponder_003", "ponder_004",
+                    "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
 
     def _start_heartbeat(self):
+        """
+        name: _start_heartbeat
+        description: Launches a background thread that periodically sends PING PDUs to the server.
+        """
+
         thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         thread.start()
 
     def _heartbeat_loop(self):
+        """
+        name: _heartbeat_loop
+        description: Continuously sends PING PDUs every 30 seconds and starts a timeout timer for each PONG.
+        """
+
         while self.is_running:
             time.sleep(30)
             if self.sock:
@@ -46,6 +71,11 @@ class MTGNPClient:
                 self._send_pdu(ping_pdu)
 
     def _on_pong_timeout(self):
+        """
+        name: _on_pong_timeout
+        description: Called when the PONG response times out, forcing the socket to close to trigger reconnection.
+        """
+
         if VERBOSE_MODE:
             print(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
             print("[client] Closing connection due to no response from server...")
@@ -59,6 +89,12 @@ class MTGNPClient:
                 pass
 
     def _send_pdu(self, pdu):
+        """
+        name: _send_pdu
+        description: Serializes a PDU to JSON, frames it with a length prefix, and sends it over the socket.
+        @param: pdu (dict): The PDU object to send.
+        """
+
         try:
             payload = json.dumps(pdu).encode('utf-8')
 
@@ -72,6 +108,13 @@ class MTGNPClient:
             if VERBOSE_MODE: print("[client] Failed to send PDU: Socket not connected.")
 
     def _recv_exact(self, num_bytes):
+        """
+        name: _recv_exact
+        description: Reads exactly num_bytes from the socket, returning the data as bytes.
+        @param: num_bytes (int): Number of bytes to read.
+        @return: bytes: The received data, or None if connection closed.
+        """
+
         chunks = []
         bytes_received = 0
 
@@ -85,6 +128,12 @@ class MTGNPClient:
         return b"".join(chunks)
 
     def _recv_pdu(self):
+        """
+        name: _recv_pdu
+        description: Reads a framed PDU from the socket, parses it as JSON, and returns the decoded dictionary.
+        @return: dict or None: The parsed PDU, or None on error or disconnect.
+        """
+
         try:
             header = self._recv_exact(4)
             if header is None:
@@ -105,6 +154,12 @@ class MTGNPClient:
             return None
 
     def connect_and_identify(self):
+        """
+        name: connect_and_identify
+        description: Establishes a TCP connection to the server and sends a PLAYER_READY PDU with the player's deck.
+        @return: bool: True if connection and identification succeeded, False otherwise.
+        """
+
         while self.is_running:
             try:
                 if VERBOSE_MODE: print(f"[client] Attempting to connect to {self.host}:{self.port}...")
@@ -124,6 +179,7 @@ class MTGNPClient:
                     "player_id": self.player_id,
                     "deck_list": self.deck
                 }
+                if VERBOSE_MODE: print(f"[client] Sending PDU to server: {ready_pdu}")
                 self._send_pdu(ready_pdu)
                 return True
 
@@ -133,6 +189,11 @@ class MTGNPClient:
         return False
 
     def run(self):
+        """
+        name: run
+        description: Main client loop that connects, starts heartbeat, and processes incoming PDUs.
+        """
+
         if not self.connect_and_identify():
             return
 
@@ -152,6 +213,12 @@ class MTGNPClient:
             self.handle_pdu(pdu)
 
     def handle_pdu(self, pdu):
+        """
+        name: handle_pdu
+        description: Dispatches incoming PDUs to appropriate handling logic based on the message type.
+        @param: pdu (dict): The received PDU dictionary.
+        """
+
         p_type = pdu.get("type")
 
         if p_type == "PONG":
@@ -168,13 +235,31 @@ class MTGNPClient:
             else:
                 if VERBOSE_MODE: print(f"[client] ??? Received stale PONG (expected {self.last_ping_seq}, got {pdu.get('seq_num')})")
 
+
         elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
-            print(f"\n--- STATE UPDATE (Seq: {pdu.get('seq_num')}) ---")
-            print(f"Phase: {state.get('phase')}")
-            print(f"Players Ready: {state.get('players_ready')}")
-            if state.get('waiting_for'):
-                print(f"Waiting for: {state.get('waiting_for')}")
+            phase = state.get("phase")
+            seq_num = pdu.get("seq_num")
+
+            print(f"\n--- STATE UPDATE (Seq: {seq_num}) ---")
+            print(f"Phase: {phase}")
+
+            if phase == "LOBBY":
+                print(f"Players Ready: {state.get('players_ready', 0)}")
+                if state.get('waiting_for'):
+                    print(f"Waiting for: {state.get('waiting_for')}")
+            else:
+                print(f"Turn: {state.get('turn')} | Active Player: {state.get('active_player')}")
+                print(f"Life Totals: {state.get('life_totals', {})}")
+                print(f"Your Hand: {state.get('hand', [])}")
+                print(f"Opponent Hand Count: {state.get('hand_counts', {})}")
+                print(f"Library Counts: {state.get('library_counts', {})}")
+                print(f"Battlefield: {state.get('battlefield', {})}")
+                print(f"Graveyard: {state.get('graveyard', {})}")
+                print(f"Stack: {state.get('stack', [])}")
+
+            if VERBOSE_MODE:
+                print(f"[client] Received GAME_STATE_UPDATE: {pdu}")
 
         elif p_type == "ERROR":
             if VERBOSE_MODE: print(f"\n[client] ERROR from server ({pdu.get('code')}): {pdu.get('message')}")

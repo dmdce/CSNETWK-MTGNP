@@ -4,10 +4,13 @@ import threading
 import traceback
 from protocol import send_pdu, recv_pdu, InvalidPduError
 from engine import GameEngine
+from logger import log_pdu, clear_log
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
 VERBOSE_MODE = False
+
+clear_log("server_stream.jsonl")
 
 # LEGAL_CARDS = {"Mountain", "Forest", "Plains", "Island", "Swamp", "Lightning Bolt", "Shock", 
 #                "Lava Spike", "Flame Slash", "Searing Spear", "Skullcrack", "Rift Bolt", 
@@ -85,6 +88,11 @@ LEGAL_CARDS = {
 
 class MTGNPServer:
     def __init__(self):
+        """
+        name: __init__
+        description: Initializes the MTGNP server with default attributes and creates a new GameEngine instance.
+        """
+
         self.host = HOST
         self.port = PORT
         self.clients = []
@@ -97,6 +105,12 @@ class MTGNPServer:
         self.engine = GameEngine(self)
 
     def handle_disconnect(self, player_id):
+        """
+        name: handle_disconnect
+        description: Marks a player as disconnected and starts a 10-second reconnection timer.
+        @param: player_id (str): The ID of the player who disconnected.
+        """
+
         if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
             return
 
@@ -109,12 +123,26 @@ class MTGNPServer:
         timer.start()
 
     def on_reconnect_timeout(self, player_id):
+        """
+        name: on_reconnect_timeout
+        description: Called when the reconnect timer expires; ends the game with the disconnected player as loser.
+        @param: player_id (str): The ID of the player who failed to reconnect.
+        """
+
         if self.players[player_id]['status'] == 'DISCONNECTED':
             if VERBOSE_MODE: print(f"[server] FAILURE: {player_id} failed to reconnect. Ending game.")
             with self.lock:
                 self.engine.game_over(loser_id=player_id, reason="DISCONNECT")
 
     def handle_client_reconnect(self, new_sock, player_id):
+        """
+        name: handle_client_reconnect
+        description: Cancels the disconnect timer and updates the socket for a reconnecting player.
+        @param: new_sock (socket): The new client socket.
+        @param: player_id (str): The ID of the player reconnecting.
+        @return: bool: True if the reconnect was successful, False otherwise.
+        """
+
         if player_id in self.players and self.players[player_id]['status'] == 'DISCONNECTED':
             if VERBOSE_MODE: print(f"[server] Player {player_id} has reconnected! Cancelling the timeout.")
 
@@ -129,8 +157,14 @@ class MTGNPServer:
         return False
 
     def broadcast_lobby_status(self):
+        """
+        name: broadcast_lobby_status
+        description: Sends a GAME_STATE_UPDATE to all connected clients indicating the current lobby status.
+        """
+
         count_ready = len(self.players)
-        waiting_for = ["player_2"] if count_ready == 1 else []
+        all_expected = ["player_1", "player_2"]
+        waiting_for = [pid for pid in all_expected if pid not in self.players]
 
         update = {
             "type": "GAME_STATE_UPDATE",
@@ -143,15 +177,28 @@ class MTGNPServer:
         }
 
         for client, _ in self.clients:
+            if VERBOSE_MODE: print(f"Sent update PDU to client {client}: {update}")
             send_pdu(client, update)
             
     def reset_lobby_state(self):
+        """
+        name: reset_lobby_state
+        description: Resets the game state and engine, transitions to LOBBY, and broadcasts lobby status.
+        """
+
         self.players = {}
         self.phase = "LOBBY"
         self.engine.reset_state()
         self.broadcast_lobby_status()
 
     def handle_client(self, conn, addr):
+        """
+        name: handle_client
+        description: Main handler for a single client connection; processes incoming PDUs and manages game flow.
+        @param: conn (socket): The client socket.
+        @param: addr (tuple): The client's address.
+        """
+
         pid = None
 
         if VERBOSE_MODE: print("[server] Connected to", addr)
@@ -198,13 +245,15 @@ class MTGNPServer:
                                 existing_player = self.players[new_pid]
 
                                 if existing_player.get('status') == 'CONNECTED':
-                                    error = {
-                                        "type": "ERROR",
-                                        "seq_num": self.get_next_sequence_number(),
-                                        "code": "DUPLICATE_ID",
-                                        "message": f"Player ID '{new_pid}' is already taken.",
-                                        "rejected_action": pdu
-                                    }
+                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu, self.get_next_sequence_number())
+                                    # error = {
+                                    #     "type": "ERROR",
+                                    #     "seq_num": self.get_next_sequence_number(),
+                                    #     "code": "DUPLICATE_ID",
+                                    #     "message": f"Player ID '{new_pid}' is already taken.",
+                                    #     "rejected_action": pdu
+                                    # }
+                                    # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                     send_pdu(conn, error)
                                     continue
                                 else:
@@ -222,19 +271,22 @@ class MTGNPServer:
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
                                 }
+                                if VERBOSE_MODE: print(f"[server] ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
 
                             invalid_cards = [card for card in deck if card not in LEGAL_CARDS]
                             if not (1 <= len(deck) <= 50) or invalid_cards:
-                                error = {
-                                    "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_number(),
-                                    "code": "ILLEGAL_DECK",
-                                    "message": "Invalid deck size, or contains illegal cards.",
-                                    "rejected_action": pdu
-                                }
-                                send_pdu(conn, error)
+                                self.send_error(new_pid, "ILLEGAL_DECK", "Invalid deck size, or contains illegal cards.", pdu, self.get_next_sequence_number())
+                                # error = {
+                                #     "type": "ERROR",
+                                #     "seq_num": self.get_next_sequence_number(),
+                                #     "code": "ILLEGAL_DECK",
+                                #     "message": "Invalid deck size, or contains illegal cards.",
+                                #     "rejected_action": pdu
+                                # }
+                                # if VERBOSE_MODE: print(f"[server] ERROR: {error}")
+                                # send_pdu(conn, error)
                                 continue
 
                             # Step 2: Registration
@@ -284,17 +336,37 @@ class MTGNPServer:
         conn.close()
         
     def get_player_id_by_socket(self, sock):
+        """
+        name: get_player_id_by_socket
+        description: Returns the player ID associated with a given socket, or None if not found.
+        @param: sock (socket): The socket to look up.
+        @return: str or None: The player ID, or None.
+        """
+
         for pid, info in self.players.items():
             if info['sock'] == sock:
                 return pid
         return None
     
     def send_to_player(self, player_id, pdu):
+        """
+        name: send_to_player
+        description: Sends a PDU to a specific connected player.
+        @param: player_id (str): The target player's ID.
+        @param: pdu (dict): The PDU to send.
+        """
+
         if player_id in self.players:
             send_pdu(self.players[player_id]['sock'], pdu)
             self.players[player_id]['last_seq_sent'] = pdu.get('seq_num')
 
     def broadcast(self, pdu):
+        """
+        name: broadcast
+        description: Sends a PDU to all connected players.
+        @param: pdu (dict): The PDU to broadcast.
+        """
+
         for pid, info in self.players.items():
             if info.get('status') == 'CONNECTED':
                 try:
@@ -304,10 +376,54 @@ class MTGNPServer:
                     pass
     
     def get_next_sequence_number(self):
+        """
+        name: get_next_sequence_number
+        description: Increments the server's sequence counter and returns the new value.
+        @return: int: The next sequence number.
+        """
+
         self.seq_num += 1
         return self.seq_num
 
+    def send_error(self, player_id, code, message, rejected_action=None, seq=None):
+        """
+        name: send_error
+        description: Sends an ERROR PDU to a target player.
+
+        @param player_id (str): Target Player ID.
+        @param code (str): The error code.
+        @param message (str): The error message.
+        @param rejected_action (dict, optional): The PDU that caused the error.
+        @param seq (int, optional): Sequence number to use. If None, use server's next sequence number.
+        """
+
+        if player_id not in self.players or self.players[player_id].get('status') != 'CONNECTED':
+            return # Client is already gone
+
+        seq_num = seq if seq is not None else self.get_next_sequence_number()
+
+        error_pdu = {
+            "type": "ERROR",
+            "seq_num": seq_num,
+            "code": code,
+            "message": message
+        }
+        if rejected_action is not None:
+            error_pdu["rejected_action"] = rejected_action
+
+        if VERBOSE_MODE: print(f"[server] Sending ERROR to {player_id}: {error_pdu}")
+
+        try:
+            send_pdu(self.players[player_id]['sock'], error_pdu)
+        except Exception:
+            pass
+
     def start(self):
+        """
+        name: start
+        description: Binds and listens on the server port, accepts client connections, and spawns handler threads.
+        """
+
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
@@ -330,6 +446,7 @@ class MTGNPServer:
                         "code": "ROOM_FULL",
                         "message": "Two players are already connected. Please try again later."
                     }
+                    if VERBOSE_MODE: print(f"[server] ERROR: {error_pdu}")
                     send_pdu(conn, error_pdu)
                     conn.close()
                 except:
@@ -338,6 +455,7 @@ class MTGNPServer:
 
             # If room is available, handle client
             threading.Thread(target=self.handle_client, args=(conn, addr), daemon=True).start()
+
 
 if __name__ == "__main__":
     if "verbose" in sys.argv: VERBOSE_MODE = True
