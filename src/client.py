@@ -148,7 +148,7 @@ class MTGNPClient:
 
                 # Validate bottom card count
                 if len(provided_cards) != self.mulligan_count:
-                    print(f"❌ Error: You mulliganed {self.mulligan_count} time(s). You must supply exactly {self.mulligan_count} card ID(s) to bottom.")
+                    print(f"Error: You mulliganed {self.mulligan_count} time(s). You must supply exactly {self.mulligan_count} card ID(s) to bottom.")
                     print(f"   Usage example: keep {' '.join(self.current_hand[:self.mulligan_count])}")
                     return
 
@@ -156,7 +156,7 @@ class MTGNPClient:
                 temp_hand = list(self.current_hand)
                 for card_id in provided_cards:
                     if card_id not in temp_hand:
-                        print(f"❌ Error: Card '{card_id}' is not in your current hand.")
+                        print(f"Error: Card '{card_id}' is not in your current hand.")
                         return
                     temp_hand.remove(card_id)
 
@@ -393,7 +393,7 @@ class MTGNPClient:
                 print(f"Your Hand ({len(self.current_hand)} cards): {self.current_hand}")
                 print(f"Times Mulliganed: {self.mulligan_count}")
                 if self.mulligan_count > 0:
-                    print(f"Enter command: 'discard <card_id1> ...' ({self.mulligan_count} card(s) to bottom) OR 'mulligan'")
+                    print(f"Enter command: 'keep <card_id1> ...' ({self.mulligan_count} card(s) to bottom) OR 'mulligan'")
                 else:
                     print(f"Enter command: 'keep' OR 'mulligan'")
                 print(f"================================================")

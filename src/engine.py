@@ -26,6 +26,7 @@ class GameEngine:
         self.mulligan_choices = {}
         self.mulligan_counts = {}
         self.mulligan_sequence = {}
+        self.last_phase_transition_seq = None
         self.priority_sequence = None
         self.consecutive_passes = 0
         self.turn_manager = None
@@ -41,6 +42,7 @@ class GameEngine:
         self.mulligan_choices = {}
         self.mulligan_counts = {}
         self.mulligan_sequence = {}
+        self.last_phase_transition_seq = None
         self.priority_sequence = None
         self.consecutive_passes = 0
         self.turn_manager = None
@@ -278,6 +280,32 @@ class GameEngine:
 
         self.broadcast_phase_transition(from_phase, to_phase)
         self.send_personalized_state_update()
+
+    def handle_declare_attackers_pdu(self, player_id, pdu):
+        """
+        Processes a DECLARE_ATTACKERS PDU and validates sequence number against transition.
+        """
+        seq = pdu.get("seq_num")
+        if seq != self.last_phase_transition_seq:
+            self.server.send_error(
+                player_id,
+                "STALE_ACTION",
+                f"Expected sequence number {self.last_phase_transition_seq}, but got {seq}.",
+                pdu
+            )
+            return
+
+        attackers = pdu.get("attackers", [])
+        try:
+            self.turn_manager.declare_attackers(player_id, attackers)
+        except GameRuleError as e:
+            self.server.send_error(player_id, e.code, e.message, pdu)
+            return
+
+        self.send_personalized_state_update()
+
+        # Section 9.3: Priority window opens after declaring attackers
+        self.grant_priority(self.turn_manager.active_player)
 
     def _validate_priority_action(self, player_id, pdu):
         """

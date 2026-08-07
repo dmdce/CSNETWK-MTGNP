@@ -157,6 +157,62 @@ class TurnManager:
 
         return "PRECOMBAT_MAIN", "BEGIN_COMBAT"
 
+    def declare_attackers(self, player_id, attackers):
+        """
+        Validates and applies declared attackers according to MTGNP v1.0 Section 9.3.
+        """
+        if self.state.get("phase") != "DECLARE_ATTACKERS":
+            raise GameRuleError("WRONG_PHASE", "Cannot declare attackers outside of DECLARE_ATTACKERS step.")
+
+        if player_id != self.active_player:
+            raise GameRuleError("NOT_YOUR_PRIORITY", "Only the active player can declare attackers.")
+
+        if not isinstance(attackers, list):
+            raise GameRuleError("ILLEGAL_ACTION", "'attackers' must be a list.")
+
+        ap_battlefield = self.state.get("battlefield", {}).get(player_id, [])
+        valid_attackers = []
+
+        # Validate each attacker object according to Section 10.2.15 schema
+        for attacker in attackers:
+            if not isinstance(attacker, dict) or "creature_id" not in attacker or "target" not in attacker:
+                raise GameRuleError("ILLEGAL_ACTION", "Each attacker must specify creature_id and target.")
+
+            attacker_id = attacker["creature_id"]
+            perm = next((c for c in ap_battlefield if isinstance(c, dict) and c.get("id") == attacker_id), None)
+
+            if not perm:
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} is not on your battlefield.")
+
+            if perm.get("tapped", False):
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} is already tapped.")
+
+            if perm.get("summoning_sick", False) and not perm.get("haste", False):
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} has summoning sickness.")
+
+            valid_attackers.append(attacker)
+
+        # Apply state changes
+        declared_attacker_ids = []
+        for attacker in valid_attackers:
+            attacker_id = attacker["creature_id"]
+            perm = next(c for c in ap_battlefield if c.get("id") == attacker_id)
+            if not perm.get("vigilance", False):
+                perm["tapped"] = True
+            perm["attacking"] = True
+            declared_attacker_ids.append(attacker_id)
+
+        self.state["declared_attackers"] = valid_attackers
+
+        # Section 9.3: If no attackers declared, skip directly to END_OF_COMBAT
+        if not declared_attacker_ids:
+            self.state["phase"] = "END_OF_COMBAT"
+        else:
+            self.state["phase"] = "DECLARE_BLOCKERS"
+
+        self.state["priority_holder"] = self.active_player
+        return declared_attacker_ids
+
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
         if not library:

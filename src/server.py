@@ -14,19 +14,6 @@ PORT = 4444
 
 clear_log("server_stream.jsonl")
 
-# LEGAL_CARDS = {"Mountain", "Forest", "Plains", "Island", "Swamp", "Lightning Bolt", "Shock", 
-#                "Lava Spike", "Flame Slash", "Searing Spear", "Skullcrack", "Rift Bolt", 
-#                "Incinerate", "Goblin Guide", "Goblin Bushwhacker", "Reckless Wurm", 
-#                "Monastery Swiftspear", "Counterspell", "Cancel", "Unsummon", "Ponder", 
-#                "Negate", "Mana Leak", "Merfolk Looter", "Prodigal Sorcerer", 
-#                "Air Elemental", "Phantasmal Bear", "Giant Growth", "Rampant Growth", 
-#                "Naturalize", "Vines of Vastwood", "Llanowar Elves", "Elvish Mystic", 
-#                "Grizzly Bears", "Leatherback Baloth", "Troll Ascetic", "Wall of Stone", 
-#                "Swords to Plowshares", "Path to Exile", "Healing Salve", "Pacifism", 
-#                "White Knight", "Serra Angel", "Savannah Lions", "Mother of Runes", 
-#                "Dark Ritual", "Terror", "Doom Blade", "Raise Dead", "Mind Rot", 
-#                "Gray Merchant of Asphodel", "Gravedigger", "Royal Assassin", 
-#                "Black Knight", "Sol Ring", "Ornithopter", "Millstone", "Rod of Ruin"}
 LEGAL_CARDS = {
     "lightning_bolt_001", "lightning_bolt_002", "lightning_bolt_003", "lightning_bolt_004",
     "shock_001", "shock_002", "shock_003", "shock_004",
@@ -81,12 +68,23 @@ LEGAL_CARDS = {
     "ornithopter_001", "ornithopter_002", "ornithopter_003", "ornithopter_004",
     "millstone_001", "millstone_002", "millstone_003", "millstone_004",
     "rod_of_ruin_001", "rod_of_ruin_002", "rod_of_ruin_003", "rod_of_ruin_004",
-    "mountain_001", "mountain_002", "mountain_003", "mountain_004", "mountain_005", "mountain_006", "mountain_007", "mountain_008", "mountain_009", "mountain_010", "mountain_011", "mountain_012", "mountain_013", "mountain_014", "mountain_015", "mountain_016", "mountain_017", "mountain_018", "mountain_019", "mountain_020",
-    "forest_001", "forest_002", "forest_003", "forest_004", "forest_005", "forest_006", "forest_007", "forest_008", "forest_009", "forest_010", "forest_011", "forest_012", "forest_013", "forest_014", "forest_015", "forest_016", "forest_017", "forest_018", "forest_019", "forest_020",
-    "plains_001", "plains_002", "plains_003", "plains_004", "plains_005", "plains_006", "plains_007", "plains_008", "plains_009", "plains_010", "plains_011", "plains_012", "plains_013", "plains_014", "plains_015", "plains_016", "plains_017", "plains_018", "plains_019", "plains_020",
-    "island_001", "island_002", "island_003", "island_004", "island_005", "island_006", "island_007", "island_008", "island_009", "island_010", "island_011", "island_012", "island_013", "island_014", "island_015", "island_016", "island_017", "island_018", "island_019", "island_020",
-    "swamp_001", "swamp_002", "swamp_003", "swamp_004", "swamp_005", "swamp_006", "swamp_007", "swamp_008", "swamp_009", "swamp_010", "swamp_011", "swamp_012", "swamp_013", "swamp_014", "swamp_015", "swamp_016", "swamp_017", "swamp_018", "swamp_019", "swamp_020",
+    "mountain_001", "mountain_002", "mountain_003", "mountain_004", "mountain_005", "mountain_006", "mountain_007",
+    "mountain_008", "mountain_009", "mountain_010", "mountain_011", "mountain_012", "mountain_013", "mountain_014",
+    "mountain_015", "mountain_016", "mountain_017", "mountain_018", "mountain_019", "mountain_020",
+    "forest_001", "forest_002", "forest_003", "forest_004", "forest_005", "forest_006", "forest_007", "forest_008",
+    "forest_009", "forest_010", "forest_011", "forest_012", "forest_013", "forest_014", "forest_015", "forest_016",
+    "forest_017", "forest_018", "forest_019", "forest_020",
+    "plains_001", "plains_002", "plains_003", "plains_004", "plains_005", "plains_006", "plains_007", "plains_008",
+    "plains_009", "plains_010", "plains_011", "plains_012", "plains_013", "plains_014", "plains_015", "plains_016",
+    "plains_017", "plains_018", "plains_019", "plains_020",
+    "island_001", "island_002", "island_003", "island_004", "island_005", "island_006", "island_007", "island_008",
+    "island_009", "island_010", "island_011", "island_012", "island_013", "island_014", "island_015", "island_016",
+    "island_017", "island_018", "island_019", "island_020",
+    "swamp_001", "swamp_002", "swamp_003", "swamp_004", "swamp_005", "swamp_006", "swamp_007", "swamp_008", "swamp_009",
+    "swamp_010", "swamp_011", "swamp_012", "swamp_013", "swamp_014", "swamp_015", "swamp_016", "swamp_017", "swamp_018",
+    "swamp_019", "swamp_020",
 }
+
 
 class MTGNPServer:
     def __init__(self):
@@ -132,24 +130,6 @@ class MTGNPServer:
         timer = threading.Timer(10, self.on_reconnect_timeout, [player_id])
         self.players[player_id]['timer'] = timer
         timer.start()
-
-    # def handle_disconnect(self, player_id):
-    #     """
-    #     name: handle_disconnect
-    #     description: Marks a player as disconnected and starts a 10-second reconnection timer.
-    #     @param: player_id (str): The ID of the player who disconnected.
-    #     """
-    #
-    #     if player_id not in self.players or self.players[player_id]['status'] == 'DISCONNECTED':
-    #         return
-    #
-    #     logger.debug(f"Player {player_id} disconnected. Starting 10s timer...")
-    #     self.players[player_id]['status'] = 'DISCONNECTED'
-    #
-    #     # Start the reconnect timer
-    #     timer = threading.Timer(10, self.on_reconnect_timeout, [player_id])
-    #     self.players[player_id]['timer'] = timer
-    #     timer.start()
 
     def on_reconnect_timeout(self, player_id):
         """
@@ -213,14 +193,12 @@ class MTGNPServer:
             }
         }
 
-        # for client, _ in self.clients:
-        #     send_pdu(client, update)
         for player_info in self.players.values():
             client = player_info.get('sock')
             if client is None:
                 continue
             send_pdu(client, update)
-            
+
     def reset_lobby_state(self):
         """
         name: reset_lobby_state
@@ -288,7 +266,7 @@ class MTGNPServer:
                             if not new_pid or not isinstance(new_pid, str):
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_number(),
+                                    "seq_num": pdu.get("seq_num", self.get_next_sequence_number()),
                                     "code": "ILLEGAL_ACTION",
                                     "message": "player_id must be a non-empty string.",
                                     "rejected_action": pdu
@@ -301,7 +279,7 @@ class MTGNPServer:
                             if not (1 <= len(deck) <= 50) or invalid_cards:
                                 error = {
                                     "type": "ERROR",
-                                    "seq_num": self.get_next_sequence_number(),
+                                    "seq_num": pdu.get("seq_num", self.get_next_sequence_number()),
                                     "code": "ILLEGAL_DECK",
                                     "message": "Invalid deck size, or contains illegal cards.",
                                     "rejected_action": pdu
@@ -316,8 +294,7 @@ class MTGNPServer:
 
                                 if existing_player.get('status') == 'CONNECTED':
                                     self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.",
-                                                    pdu)
-                                    logger.error("!!! ERROR AT LINE 279 !!!")
+                                                    pdu, seq=pdu.get("seq_num"))
                                     return
                                 else:
                                     # Reconnect logic: Cancel their timeout timer
@@ -358,16 +335,6 @@ class MTGNPServer:
                 traceback.print_exc()
                 break
 
-        # with self.lock:
-        #     if self.phase not in ["LOBBY", "GAME_OVER"]:
-        #         pid = self.get_player_id_by_socket(conn)
-        #         if pid:
-        #             logger.error(f"Player {pid} disconnected during game.")
-        #             self.engine.game_over(loser_id=pid, reason="DISCONNECT")
-        #
-        # if pid:
-        #     self.handle_disconnect(pid)
-
         with self.lock:
             pid = pid or self.get_player_id_by_socket(conn)
             if pid:
@@ -375,7 +342,7 @@ class MTGNPServer:
 
         logger.debug(f"Closing connection for {addr}...")
         conn.close()
-        
+
     def get_player_id_by_socket(self, sock):
         """
         name: get_player_id_by_socket
@@ -388,7 +355,7 @@ class MTGNPServer:
             if info['sock'] == sock:
                 return pid
         return None
-    
+
     def send_to_player(self, player_id, pdu):
         """
         name: send_to_player
@@ -415,7 +382,7 @@ class MTGNPServer:
                     info['last_seq_sent'] = pdu.get('seq_num')
                 except Exception:
                     pass
-    
+
     def get_next_sequence_number(self):
         """
         name: get_next_sequence_number
@@ -440,16 +407,20 @@ class MTGNPServer:
 
         info = self.players.get(player_id)
         if info is None:
-            return  # Player not found, cannot send error
-        
+            return
+
         status = info.get('status', 'CONNECTED')
         if status != 'CONNECTED' and status != 'DISCONNECTED':
             return  # Player is not in a state to receive messages
         if info.get('sock') is None:
             return  # Player has no socket to send to
-        
 
-        seq_num = seq if seq is not None else self.get_next_sequence_number()
+        if seq is not None:
+            seq_num = seq
+        elif rejected_action and "seq_num" in rejected_action:
+            seq_num = rejected_action["seq_num"]
+        else:
+            seq_num = self.get_next_sequence_number()
 
         error_pdu = {
             "type": "ERROR",
@@ -476,7 +447,7 @@ class MTGNPServer:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
-        server.listen(5) # Backlog
+        server.listen(5)  # Backlog
 
         logger.debug(f"Listening on {self.host}:{self.port}...")
 
@@ -498,7 +469,7 @@ class MTGNPServer:
                     logger.error(f"ERROR: {error_pdu}")
                     send_pdu(conn, error_pdu)
                     conn.close()
-                except:
+                except Exception:
                     pass
                 continue
 
@@ -518,7 +489,7 @@ if __name__ == "__main__":
         logger.info("Verbose mode active!\n")
     else:
         print("NOTE: Verbose mode is not active. Debug lines are hidden. Include '--verbose' as a flag to activate verbose mode.\n")
-        
+
     server = MTGNPServer()
 
     try:
