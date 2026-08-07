@@ -74,7 +74,7 @@ class MTGNPClient:
                 self.pong_timer = threading.Timer(10.0, self._on_pong_timeout)
                 self.pong_timer.start()
 
-                logging.debug(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
+                logger.debug(f"[PING] Sending heartbeat (seq: {self.seq_num}). Waiting for PONG...")
                 self._send_pdu(ping_pdu)
 
     def _on_pong_timeout(self):
@@ -83,8 +83,8 @@ class MTGNPClient:
         description: Called when the PONG response times out, forcing the socket to close to trigger reconnection.
         """
 
-        logging.error(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
-        logging.debug("[client] Closing connection due to no response from server...")
+        logger.error(f"[client] TIMEOUT: No PONG received for seq {self.last_ping_seq} within 10s.")
+        logger.debug("[client] Closing connection due to no response from server...")
 
         if self.sock:
             try:
@@ -346,7 +346,7 @@ class MTGNPClient:
                     self.pong_timer.cancel()
 
                 latency = round((time.time() - pdu.get("timestamp")) * 1000, 2)
-                logging.debug(f"[PONG] Received. Latency: {latency}ms, ping timer cancelled")
+                logger.debug(f"[PONG] Received. Latency: {latency}ms, ping timer cancelled")
             else:
                 logger.warning(f"??? Received stale PONG (expected {self.last_ping_seq}, got {pdu.get('seq_num')})")
 
@@ -383,14 +383,14 @@ class MTGNPClient:
                 print(f"Graveyard: {state.get('graveyard', {})}")
                 print(f"Stack: {state.get('stack', [])}")
 
-            # logging.debug(f"Received GAME_STATE_UPDATE: {pdu}")
+            # logger.debug(f"Received GAME_STATE_UPDATE: {pdu}")
             logger.debug(
                 "Received GAME_STATE_UPDATE:\n%s",
                 json.dumps(pdu, indent=2, sort_keys=True),
             )
 
         elif p_type == "ERROR":
-            logging.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
+            logger.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
 
         elif p_type == "GAME_OVER":
             print(f"\n--- GAME OVER ---")
