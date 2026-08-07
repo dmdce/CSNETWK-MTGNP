@@ -149,7 +149,7 @@ class TurnManager:
 
         for trg in ordered_triggers:
             self.push(
-                item_type="TRIGGER",
+                item_type="TRIGGER_ABILITY",
                 source=trg["source_id"],
                 controller=trg["controller_id"],
                 effect=trg.get("effect", {})

@@ -27,6 +27,8 @@ class MTGNPClient:
         self.seq_num = 0
         self.last_ping_seq = -1
         self.server_seq_num = None
+        self.priority_seq_num = None
+        self.has_priority = False
         self.last_server_seq = 0         # Sequence number received from server's latest state update
         self.mulligan_count = 0          # Number of mulligans taken in current game
         self.current_hand = []           # Local tracking of drawn hand
@@ -194,7 +196,30 @@ class MTGNPClient:
                 print("In lobby. Waiting for match setup... (type 'ready' to re-send readiness)")
 
         else:
-            print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}")
+            if cmd in ("pass", "p"):
+                if not self.has_priority or self.priority_seq_num is None:
+                    print("You cannot pass because you do not currently hold priority.")
+                    return
+                self._send_pdu({
+                    "type": "PRIORITY_PASS",
+                    "seq_num": self.priority_seq_num,
+                })
+                self.has_priority = False
+                print("[ACTION] Priority passed.")
+            elif cmd == "concede":
+                self._send_pdu({
+                    "type": "CONCEDE",
+                    "seq_num": self.last_server_seq,
+                    "player_id": self.player_id,
+                })
+                self.has_priority = False
+                print("[ACTION] Conceding the game...")
+            elif cmd == "help":
+                print("\n--- IN-GAME COMMANDS ---")
+                print("  pass / p : Pass priority")
+                print("  concede  : Concede the current game\n")
+            else:
+                print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}. Type 'help'.")
 
     def _send_pdu(self, pdu):
         """
@@ -388,6 +413,21 @@ class MTGNPClient:
                 "Received GAME_STATE_UPDATE:\n%s",
                 json.dumps(pdu, indent=2, sort_keys=True),
             )
+
+        elif p_type == "PHASE_TRANSITION":
+            self.current_phase = pdu.get("to_phase", self.current_phase)
+            self.has_priority = False
+            print(
+                f"\n[PHASE] {pdu.get('from_phase')} -> {self.current_phase} "
+                f"| Turn {pdu.get('turn')} | Active: {pdu.get('active_player')}"
+            )
+
+        elif p_type == "PRIORITY_GRANT":
+            if pdu.get("player_id") == self.player_id:
+                self.priority_seq_num = pdu.get("seq_num")
+                self.has_priority = True
+                print(f"\n[PRIORITY] You have priority (seq {self.priority_seq_num}).")
+                print("Type 'pass' to pass priority, or 'help' for available commands.")
 
         elif p_type == "ERROR":
             logging.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
