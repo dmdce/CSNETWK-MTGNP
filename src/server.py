@@ -277,7 +277,7 @@ class MTGNPServer:
                     }
                     send_pdu(conn, pong_pdu)
                     continue
-                
+
                 with self.lock:
                     if self.phase == "LOBBY":
                         if p_type == "PLAYER_READY":
@@ -285,7 +285,7 @@ class MTGNPServer:
                             deck = pdu.get('deck_list', [])
 
                             # Step 1: Validation
-                            if not new_pid:
+                            if not new_pid or not isinstance(new_pid, str):
                                 error = {
                                     "type": "ERROR",
                                     "seq_num": self.get_next_sequence_number(),
@@ -309,13 +309,14 @@ class MTGNPServer:
                                 logger.error(f"ERROR: {error}")
                                 send_pdu(conn, error)
                                 continue
-                            
+
                             # Check if pid is RECONNECT or DUPLICATE
                             if new_pid in self.players:
                                 existing_player = self.players[new_pid]
 
                                 if existing_player.get('status') == 'CONNECTED':
-                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.", pdu)
+                                    self.send_error(new_pid, "DUPLICATE_ID", f"Player ID '{new_pid}' is already taken.",
+                                                    pdu)
                                     logger.error("!!! ERROR AT LINE 279 !!!")
                                     return
                                 else:
@@ -339,22 +340,24 @@ class MTGNPServer:
                             self.broadcast_lobby_status()
 
                             # Step 4: Check if GAME_SETUP can proceed
-                            if len(self.players) == 2:
+                            if len(self.players) == 2 and all(
+                                    p['status'] == 'CONNECTED' for p in self.players.values()):
                                 logger.debug("Both players are ready. Moving to GAME_SETUP...")
                                 self.phase = "GAME_SETUP"
                                 self.engine.start_game_setup()
                     elif self.phase == "GAME_OVER":
                         continue
                     else:
-                        current_pid = self.get_player_id_by_socket(conn)
+                        # In GAME_SETUP, MULLIGAN, or gameplay phases, route input directly to game engine
+                        current_pid = pid or self.get_player_id_by_socket(conn)
                         if current_pid:
                             self.engine.handle_pdu(current_pid, pdu)
-                            
+
             except Exception:
                 logger.error(f"Exception in handle_client for {addr} (pid={pid}):")
                 traceback.print_exc()
                 break
-        
+
         # with self.lock:
         #     if self.phase not in ["LOBBY", "GAME_OVER"]:
         #         pid = self.get_player_id_by_socket(conn)
@@ -366,7 +369,7 @@ class MTGNPServer:
         #     self.handle_disconnect(pid)
 
         with self.lock:
-            pid = self.get_player_id_by_socket(conn)
+            pid = pid or self.get_player_id_by_socket(conn)
             if pid:
                 self.handle_disconnect(pid)
 
