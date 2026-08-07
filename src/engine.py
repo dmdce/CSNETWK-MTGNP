@@ -1,6 +1,10 @@
+import json
 import copy
 import random
 from turn_manager import GameRuleError, PRIORITY_STEPS, TurnManager
+from console_logger import get_logger
+
+logger = get_logger(__name__)
 
 # Minimal fixed-catalog effects owned jointly by Dev 3/4. Unknown cards are
 # still represented on the stack but resolve without a special effect.
@@ -139,7 +143,9 @@ class GameEngine:
 
             self.server.send_to_player(p, pdu)
 
-        print(f"Broadcasting state to players: {self.state}")
+        logger.debug(
+            f"Broadcasting state to players:\n%s",
+            json.dumps(self.state, indent=2, sort_keys=True))
 
     def handle_pdu(self, player_id, pdu):
         """
@@ -155,7 +161,7 @@ class GameEngine:
             if pdu_type == "MULLIGAN_CHOICE":
                 self.handle_mulligan(player_id, pdu)
         elif self.server.phase == "IN_GAME":
-            print(f"[engine.py] Received IN_GAME action from player {player_id}: {pdu_type}")
+            logger.debug(f"Received IN_GAME action from player {player_id}: {pdu_type}")
             match pdu_type:
                 case "PRIORITY_PASS":
                     self.handle_priority_pass(player_id, pdu)
@@ -273,7 +279,7 @@ class GameEngine:
             "turn": self.state["turn"]
         }
 
-        print(f"[engine] Broadcasting PHASE_TRANSITION: {pdu}")
+        logger.debug(f"Broadcasting PHASE_TRANSITION: {pdu}")
         self.server.broadcast(pdu)
 
     def transition_to_declare_attackers(self):
@@ -480,7 +486,7 @@ class GameEngine:
             "state_changes": state_changes
         }
 
-        print(f"[engine] Received {stack_resolve_pdu}")
+        logger.debug(f"Received {stack_resolve_pdu}")
         self.server.broadcast(stack_resolve_pdu)
 
         if self.check_state_based_actions():
@@ -686,7 +692,7 @@ class GameEngine:
             "time_limit_ms": 60000
         }
 
-        print(f"[engine] Granting priority to {player_id}: {priority_grant_pdu}")
+        logger.debug(f"Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
 
     def regrant_priority(self, player_id):
@@ -704,7 +710,7 @@ class GameEngine:
                 "time_limit_ms": 60000
             }
 
-            print(f"[engine] Regranting PRIORITY to player {player_id}: {regrant_priority_grant_pdu}")
+            logger.debug(f"Regranting PRIORITY to player {player_id}: {regrant_priority_grant_pdu}")
             self.server.send_to_player(player_id, regrant_priority_grant_pdu)
 
     def check_state_based_actions(self):
@@ -823,7 +829,7 @@ class GameEngine:
             "reason": reason
         }
 
-        print(f"[engine] Broadcasting GAME_OVER: {game_over_pdu}")
+        logger.debug(f"Broadcasting GAME_OVER: {game_over_pdu}")
         self.server.broadcast(game_over_pdu)
         self.server.phase = "LOBBY"
         self.server.reset_lobby_state()
