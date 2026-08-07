@@ -585,18 +585,6 @@ class GameEngine:
 
         print(f"[engine] Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
-        
-    # def send_error(self, player_id, code, message, pdu, seq=None):
-    #     error_pdu = {
-    #         "type": "ERROR",
-    #         "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
-    #         "code": code,
-    #         "message": message,
-    #         "rejected_action": pdu
-    #     }
-    #
-    #     print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
-    #     self.server.send_to_player(player_id, error_pdu)
     
     def regrant_priority(self, player_id):
         """
