@@ -161,6 +161,8 @@ class GameEngine:
                     self.handle_priority_pass(player_id, pdu)
                 case "DECLARE_ATTACKERS":
                     self.handle_declare_attackers_pdu(player_id, pdu)
+                case "DECLARE_BLOCKERS":
+                    self.handle_declare_blockers_pdu(player_id, pdu)
                 case "CAST_SPELL":
                     self.handle_cast_spell(player_id, pdu)
                 case "PLAY_LAND":
@@ -347,6 +349,43 @@ class GameEngine:
         # Priority window opens after declaring attackers if combat moves forward
         if self.state["phase"] == "DECLARE_BLOCKERS":
             self.grant_priority(self.state["active_player"])
+
+    def handle_declare_blockers_pdu(self, player_id, pdu):
+        """
+        name: handle_declare_blockers_pdu
+        description: Processes DECLARE_BLOCKERS PDU sent by non-active player.
+        @param: player_id (str): The player declaring attackers.
+        @param: pdu (dict): The DECLARE_ATTACKERS PDU.
+        """
+        if self.state["phase"] != "DECLARE_BLOCKERS":
+            self.server.send_error(player_id, "ILLEGAL_ACTION",
+                                   "Cannot declare blockers outside DECLARE_BLOCKERS step.", pdu)
+            return
+
+        if player_id == self.state["active_player"]:
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Non-active player must declare blockers.", pdu)
+            return
+
+        seq = pdu.get("seq_num")
+        if self.last_phase_transition_seq is not None and seq != self.last_phase_transition_seq:
+            self.server.send_error(player_id, "STALE_ACTION",
+                                   f"Expected sequence number {self.last_phase_transition_seq}, but got {seq}.", pdu)
+            return
+
+        blockers = pdu.get("blockers", [])
+
+        try:
+            self.turn_manager.declare_blockers(player_id, blockers)
+        except GameRuleError as e:
+            self.server.send_error(player_id, e.code, e.message, pdu)
+            return
+
+        # Broadcast updated state showing "blocking" relations while "tapped" remains False
+        self.send_personalized_state_update()
+
+        # Grant priority window before damage resolution
+        self.grant_priority(self.state["active_player"])
+
 
     def _validate_priority_action(self, player_id, pdu):
         """

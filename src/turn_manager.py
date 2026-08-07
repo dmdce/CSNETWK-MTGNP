@@ -179,7 +179,7 @@ class TurnManager:
                 raise GameRuleError("ILLEGAL_ACTION", "Each attacker must specify creature_id and target.")
 
             attacker_id = attacker["creature_id"]
-            perm = next((c for c in ap_battlefield if isinstance(c, dict) and c.get("id") == attacker_id), None)
+            perm = next((c for c in ap_battlefield if c.get("id") == attacker_id), None)
 
             if not perm:
                 raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} is not on your battlefield.")
@@ -212,6 +212,59 @@ class TurnManager:
 
         self.state["priority_holder"] = self.active_player
         return declared_attacker_ids
+
+    def declare_blockers(self, player_id, blockers):
+        """
+        Validates and applies declared blockers from the non-active player.
+        Blocking does NOT tap the blocker.
+        """
+        if self.state.get("phase") != "DECLARE_BLOCKERS":
+            raise GameRuleError("WRONG_PHASE", "Cannot declare blockers outside of DECLARE_BLOCKERS step.")
+
+        if player_id == self.active_player:
+            raise GameRuleError("NOT_YOUR_PRIORITY", "Only the non-active player (defender) can declare blockers.")
+
+        if not isinstance(blockers, list):
+            raise GameRuleError("ILLEGAL_ACTION", "'blockers' must be a list.")
+
+        nap_battlefield = self.state.get("battlefield", {}).get(player_id, [])
+        declared_attackers = self.state.get("declared_attackers", [])
+        valid_attacker_ids = {
+            a["creature_id"] if isinstance(a, dict) else a for a in declared_attackers
+        }
+
+        validated_blockers = []
+
+        for entry in blockers:
+            if not isinstance(entry, dict) or "blocker_id" not in entry or "attacker_id" not in entry:
+                raise GameRuleError("ILLEGAL_ACTION", "Each blocker must specify blocker_id and attacker_id.")
+
+            blocker_id = entry["blocker_id"]
+            attacker_id = entry["attacker_id"]
+
+            # Blocker must exist on NAP battlefield
+            perm = next((c for c in nap_battlefield if c.get("id") == attacker_id), None)
+            if not perm:
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {blocker_id} is not on your battlefield.")
+
+            # Tapped creatures cannot block
+            if perm.get("tapped", False):
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {blocker_id} is tapped and cannot block.")
+
+            # Attacker must be valid
+            if attacker_id not in valid_attacker_ids:
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} is not an active attacker.")
+
+            # Note: perm["tapped"] is deliberately NOT set to True (blocking does not tap)
+            perm["blocking"] = attacker_id
+            validated_blockers.append({"blocker_id": blocker_id, "attacker_id": attacker_id})
+
+        self.state["declared_blockers"] = validated_blockers
+
+        # Advance to priority / combat damage step and give priority to active player
+        self.state["phase"] = "COMBAT_DAMAGE"
+        self.state["priority_holder"] = self.active_player
+        return validated_blockers
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
