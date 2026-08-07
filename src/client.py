@@ -437,9 +437,13 @@ class MTGNPClient:
             print(f"Winner: {pdu.get('winner_id')} | Loser: {pdu.get('loser_id')}")
             print(f"Reason: {pdu.get('reason')}")
 
-            print(f"You are returning to the lobby. The game will start to find a new opponent in 10 seconds.")
+            print(f"You are returning to the lobby. The game will find a new opponent in 10 seconds.")
             self.seq_num = 0
             self.mulligan_count = 0
+
+            # Automatically start new game
+            time.sleep(10)
+            self.run()
 
         elif p_type == "PING":
             self._send_pdu({"type": "PONG", "seq_num": pdu.get("seq_num")})
