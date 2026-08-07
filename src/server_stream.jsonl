@@ -18,3 +18,9 @@
 {"timestamp": 1786083936.878, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 6, "timestamp": 1786083936.876752}}
 {"timestamp": 1786083966.355, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786083966.3532255}}
 {"timestamp": 1786083966.88, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786083966.8784542}}
+{"timestamp": 1786083996.356, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786083996.355062}}
+{"timestamp": 1786083996.882, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786083996.880293}}
+{"timestamp": 1786084026.359, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786084026.3581386}}
+{"timestamp": 1786084026.883, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786084026.881993}}
+{"timestamp": 1786084056.361, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 10, "timestamp": 1786084056.3597727}}
+{"timestamp": 1786084056.885, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 10, "timestamp": 1786084056.8835049}}
