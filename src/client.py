@@ -378,7 +378,11 @@ class MTGNPClient:
                 print(f"Graveyard: {state.get('graveyard', {})}")
                 print(f"Stack: {state.get('stack', [])}")
 
-            logging.debug(f"Received GAME_STATE_UPDATE: {pdu}")
+            # logging.debug(f"Received GAME_STATE_UPDATE: {pdu}")
+            logger.debug(
+                "Received GAME_STATE_UPDATE:\n%s",
+                json.dumps(pdu, indent=2, sort_keys=True),
+            )
 
         elif p_type == "ERROR":
             logging.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
