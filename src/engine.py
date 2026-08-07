@@ -109,7 +109,6 @@ class GameEngine:
                 "turn": self.state["turn"],
                 "phase": self.state["phase"],
                 "active_player": self.state["active_player"],
-                "priority_holder": self.state["priority_holder"],
                 "life_totals": copy.deepcopy(self.state["life_totals"]),
                 "hand": copy.deepcopy(self.state["hand"][p]),
                 "hand_counts": {opponent: self.state["hand_counts"][opponent]},
@@ -121,6 +120,9 @@ class GameEngine:
                 "graveyard": copy.deepcopy(self.state["graveyard"]),
                 "stack": copy.deepcopy(self.state["stack"])
             }
+
+            if "priority_holder" in self.state and self.state["priority_holder"] is not None:
+                visible_state["priority_holder"] = self.state["priority_holder"]
 
             if "land_played_this_turn" in self.state:
                 visible_state["land_played_this_turn"] = self.state["land_played_this_turn"]
@@ -204,7 +206,6 @@ class GameEngine:
                 return
         
             self.state["hand"][player_id] = temp_hand
-            self.state["hand_counts"][player_id] = len(temp_hand)
             self.state["libraries"][player_id].extend(cards_to_bottom)
             
             self.mulligan_choices[player_id] = True
@@ -223,7 +224,6 @@ class GameEngine:
             
             self.state["hand"][player_id] = library[:7]
             self.state["libraries"][player_id] = library[7:]
-            self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
             
             self.send_personalized_state_update(target_player=player_id)
             
@@ -374,23 +374,19 @@ class GameEngine:
         card_id = pdu.get("card_id")
         if card_id not in self.state["hand"][player_id]:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "The selected card is not in your hand.", pdu)
-            self.regrant_priority(player_id)
             return
         effect = self._effect_for(card_id)
         if effect.get("sorcery", effect.get("kind") == "CREATURE") and not self.turn_manager.is_sorcery_speed(player_id):
             self.server.send_error(player_id, "WRONG_PHASE", "This spell may only be cast at sorcery speed.", pdu)
-            self.regrant_priority(player_id)
             return
         targets = pdu.get("targets", [])
         if effect.get("kind") in {"DAMAGE", "COUNTER"} and not targets:
             self.server.send_error(player_id, "ILLEGAL_TARGET", "This spell requires a target.", pdu)
-            self.regrant_priority(player_id)
             return
         try:
             self.turn_manager.pay_mana(player_id, pdu.get("mana_payment", {}))
         except GameRuleError as error:
             self.server.send_error(player_id, error.code, error.message, pdu)
-            self.regrant_priority(player_id)
             return
         self.state["hand"][player_id].remove(card_id)
         self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
@@ -413,7 +409,6 @@ class GameEngine:
             self.turn_manager.play_land(player_id, pdu.get("card_id"))
         except GameRuleError as error:
             self.server.send_error(player_id, error.code, error.message, pdu)
-            self.regrant_priority(player_id)
             return
         self.send_personalized_state_update()
         self.grant_priority(player_id)
@@ -433,12 +428,10 @@ class GameEngine:
                           if isinstance(card, dict) and card.get("id") == source_id), None)
         if permanent is None:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Ability source is not under your control.", pdu)
-            self.regrant_priority(player_id)
             return
         payment = pdu.get("cost_payment", {})
         if payment.get("tap") and permanent.get("tapped"):
             self.server.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
-            self.regrant_priority(player_id)
             return
         if payment.get("tap"):
             permanent["tapped"] = True
@@ -448,7 +441,6 @@ class GameEngine:
             if payment.get("tap"):
                 permanent["tapped"] = False
             self.server.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
-            self.regrant_priority(player_id)
             return
         item = self.turn_manager.push("ABILITY", source_id, player_id, pdu.get("targets", []),
                                       abilities[ability_index])
@@ -469,21 +461,11 @@ class GameEngine:
 
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
-        except GameRuleError as error:
-            if error.code == "DECK_EMPTY":
-                self.game_over(loser_id=self.state["active_player"], reason="DECK_EMPTY")
-            elif self.state["phase"] == "BEGIN_COMBAT":
-                self.transition_to_declare_attackers()
-                return
-
-        if to_phase == "BEGIN_COMBAT":
-            self.handle_begin_combat()
+        except GameRuleError:
+            # BEGIN_COMBAT is the explicit hand-off to Dev 4's combat machine.
             return
-
         self.broadcast_phase_transition(from_phase, to_phase)
-
         if to_phase == "CLEANUP":
-            self.state["priority_holder"] = None
             self.send_personalized_state_update()
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
                 self.end_turn()
@@ -491,35 +473,6 @@ class GameEngine:
         self.send_personalized_state_update()
         if to_phase in PRIORITY_STEPS:
             self.grant_priority(self.state["active_player"])
-
-    def handle_begin_combat(self):
-        """Creating Beginning of Combat step setup:
-
-        mutates state, evaluates SBAs, notifies clients, and grants priority.
-        """
-
-        from_phase, to_phase = self.turn_manager.begin_combat_step()
-
-        if self.check_state_based_actions():
-            return
-        self.broadcast_phase_transition(from_phase, to_phase)
-        self.send_personalized_state_update()
-
-        self.grant_priority(self.state["active_player"])
-
-    def transition_to_declare_attackers(self):
-        """Closes the BEGIN_COMBAT priority window and passes execution
-
-        to the Declare Attackers step (Dev 4 boundary).
-        """
-        from_phase = self.state["phase"]
-        to_phase = "DECLARE_ATTACKERS"
-
-        self.state["phase"] = to_phase
-        self.state["priority_holder"] = None
-
-        self.broadcast_phase_transition(from_phase, to_phase)
-        self.send_personalized_state_update()
 
     @staticmethod
     def _effect_for(card_id):
@@ -675,7 +628,6 @@ class GameEngine:
         
         if self.state["phase"] != "CLEANUP" or player_id != ap:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Can only discard during your cleanup step.", pdu, seq)
-            self.regrant_priority(player_id)
             return
         
         card_ids = pdu.get("card_ids", [])
@@ -683,7 +635,6 @@ class GameEngine:
 
         if not card_ids:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "At least one card must be discarded.", pdu, seq)
-            self.regrant_priority(player_id)
             return
         
         temp_hand = list(hand)
@@ -692,11 +643,9 @@ class GameEngine:
                 temp_hand.remove(card)
         except ValueError:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Discarded cards not in hand.", pdu, seq)
-            self.regrant_priority(player_id)
             return
         
         self.state["hand"][player_id] = temp_hand
-        self.state["hand_counts"][player_id] = len(temp_hand)
         self.state["graveyard"][player_id].extend(card_ids)
         
         if len(self.state["hand"][player_id]) > 7:
@@ -720,7 +669,6 @@ class GameEngine:
             self.broadcast_phase_transition(from_phase, to_phase)
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
-
         self.grant_priority(self.state["active_player"])
     
     def game_over(self, loser_id, reason):
@@ -728,7 +676,7 @@ class GameEngine:
         name: game_over
         description: Broadcasts a GAME_OVER PDU, resets the server to LOBBY state, and clears the game engine.
         @param: loser_id (str): The ID of the losing player.
-        @param: reason (str): The reason for game over (LIFE_ZERO, DECK_EMPTY, CONCEDE, DISCONNECT).
+        @param: reason (str): The reason for game over (LIFE_ZERO, CONCEDE, DISCONNECT).
         """
 
         if not self.player_ids:
@@ -739,7 +687,9 @@ class GameEngine:
                 winner_id = self.player_ids[1] if self.state["active_player"] == self.player_ids[0] else self.player_ids[0]
             else:
                 winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
-        elif reason in {"DISCONNECT", "DECK_EMPTY", "CONCEDE"}:
+        elif reason == "CONCEDE":
+            winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
+        elif reason == "DISCONNECT":
             winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
         else:
             winner_id = self.player_ids[1] if loser_id == self.player_ids[0] else self.player_ids[0]
