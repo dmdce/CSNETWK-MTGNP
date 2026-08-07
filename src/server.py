@@ -117,7 +117,7 @@ class MTGNPServer:
             return
 
         if self.phase == "LOBBY":
-            logging.debug(f"[server] Player {player_id} disconnected in LOBBY. Removing immediately.")
+            logger.debug(f"[server] Player {player_id} disconnected in LOBBY. Removing immediately.")
             del self.players[player_id]
             self.broadcast_lobby_status()
             return
@@ -162,7 +162,7 @@ class MTGNPServer:
 
         if self.players[player_id]['status'] == 'DISCONNECTED':
             if self.phase == "LOBBY":
-                logging.debug(f"Player {player_id} was disconnected in LOBBY. Removing.")
+                logger.debug(f"Player {player_id} was disconnected in LOBBY. Removing.")
                 del self.players[player_id]
                 self.broadcast_lobby_status()
                 return
