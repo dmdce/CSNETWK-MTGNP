@@ -193,6 +193,8 @@ class MTGNPServer:
             }
         }
 
+        logger.debug(f"Sending update: {update}")
+
         for player_info in self.players.values():
             client = player_info.get('sock')
             if client is None:

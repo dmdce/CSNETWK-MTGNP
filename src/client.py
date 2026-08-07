@@ -209,7 +209,7 @@ class MTGNPClient:
             elif cmd == "concede":
                 self._send_pdu({
                     "type": "CONCEDE",
-                    "seq_num": self.last_server_seq,
+                    "seq_num": self.server_seq_num,
                     "player_id": self.player_id,
                 })
                 self.has_priority = False
@@ -437,7 +437,7 @@ class MTGNPClient:
             print(f"Winner: {pdu.get('winner_id')} | Loser: {pdu.get('loser_id')}")
             print(f"Reason: {pdu.get('reason')}")
 
-            print(f"You are returning to the lobby. Wait for your next game.")
+            print(f"You are returning to the lobby. The game will start to find a new opponent in 10 seconds.")
             self.seq_num = 0
             self.mulligan_count = 0
 
