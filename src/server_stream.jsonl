@@ -1,3 +1,31 @@
+<<<<<<< HEAD
+{"timestamp": 1786083786.345, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 1, "state": {"phase": "LOBBY", "players_ready": 1, "waiting_for": ["player_1", "player_2"]}}}
+{"timestamp": 1786083786.867, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 2, "state": {"phase": "LOBBY", "players_ready": 2, "waiting_for": ["player_1", "player_2"]}}}
+{"timestamp": 1786083786.868, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 2, "state": {"phase": "LOBBY", "players_ready": 2, "waiting_for": ["player_1", "player_2"]}}}
+{"timestamp": 1786083786.869, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "ROZETTE", "priority_holder": null, "life_totals": {"DARRYL": 20, "ROZETTE": 20}, "hand": ["mountain_008", "lightning_bolt_002", "prodigal_sorcerer_002", "mana_leak_004", "mountain_003", "goblin_guide_001", "mana_leak_002"], "hand_counts": {"ROZETTE": 7}, "library_counts": {"DARRYL": 43, "ROZETTE": 43}, "battlefield": {"DARRYL": [], "ROZETTE": []}, "graveyard": {"DARRYL": [], "ROZETTE": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786083786.87, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "ROZETTE", "priority_holder": null, "life_totals": {"DARRYL": 20, "ROZETTE": 20}, "hand": ["mountain_004", "ponder_004", "phantasmal_bear_002", "monastery_swiftspear_003", "ponder_003", "phantasmal_bear_003", "island_007"], "hand_counts": {"DARRYL": 7}, "library_counts": {"DARRYL": 43, "ROZETTE": 43}, "battlefield": {"DARRYL": [], "ROZETTE": []}, "graveyard": {"DARRYL": [], "ROZETTE": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786083793.587, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 4, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "ROZETTE", "priority_holder": null, "life_totals": {"DARRYL": 20, "ROZETTE": 20}, "hand": ["prodigal_sorcerer_002", "mountain_008", "mana_leak_003", "goblin_guide_004", "phantasmal_bear_004", "phantasmal_bear_002", "mountain_004"], "hand_counts": {"ROZETTE": 7}, "library_counts": {"DARRYL": 43, "ROZETTE": 43}, "battlefield": {"DARRYL": [], "ROZETTE": []}, "graveyard": {"DARRYL": [], "ROZETTE": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786083807.271, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 5, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "ROZETTE", "priority_holder": null, "life_totals": {"DARRYL": 20, "ROZETTE": 20}, "hand": ["island_002", "mountain_006", "monastery_swiftspear_004", "phantasmal_bear_004", "goblin_guide_002", "island_005", "counterspell_001"], "hand_counts": {"ROZETTE": 7}, "library_counts": {"DARRYL": 43, "ROZETTE": 43}, "battlefield": {"DARRYL": [], "ROZETTE": []}, "graveyard": {"DARRYL": [], "ROZETTE": []}, "stack": [], "land_played_this_turn": false}}}
+{"timestamp": 1786083816.347, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 2, "timestamp": 1786083816.346299}}
+{"timestamp": 1786083816.87, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 2, "timestamp": 1786083816.868526}}
+{"timestamp": 1786083830.469, "direction": "SENT", "pdu": {"type": "ERROR", "seq_num": 6, "code": "STALE_ACTION", "message": "Expected sequence number 5, but got 2.", "rejected_action": {"type": "MULLIGAN_CHOICE", "seq_num": 2, "keep": true, "cards_to_bottom": ["mountain_006", "island_002"]}}}
+{"timestamp": 1786083846.349, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 3, "timestamp": 1786083846.3478847}}
+{"timestamp": 1786083846.873, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 3, "timestamp": 1786083846.8707907}}
+{"timestamp": 1786083876.35, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 4, "timestamp": 1786083876.3493044}}
+{"timestamp": 1786083876.874, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 4, "timestamp": 1786083876.8731596}}
+{"timestamp": 1786083906.351, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 5, "timestamp": 1786083906.3505092}}
+{"timestamp": 1786083906.876, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 5, "timestamp": 1786083906.874733}}
+{"timestamp": 1786083936.353, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 6, "timestamp": 1786083936.3515131}}
+{"timestamp": 1786083936.878, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 6, "timestamp": 1786083936.876752}}
+{"timestamp": 1786083966.355, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786083966.3532255}}
+{"timestamp": 1786083966.88, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 7, "timestamp": 1786083966.8784542}}
+{"timestamp": 1786083996.356, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786083996.355062}}
+{"timestamp": 1786083996.882, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786083996.880293}}
+{"timestamp": 1786084026.359, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786084026.3581386}}
+{"timestamp": 1786084026.883, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786084026.881993}}
+{"timestamp": 1786084056.361, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 10, "timestamp": 1786084056.3597727}}
+{"timestamp": 1786084056.885, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 10, "timestamp": 1786084056.8835049}}
+=======
 {"timestamp": 1786002531.516, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "Rozette", "life_totals": {"Rozette": 20, "DARRYL": 20}, "hand": ["prodigal_sorcerer_001", "phantasmal_bear_004", "mountain_006", "ponder_003", "lightning_bolt_001", "mountain_007", "monastery_swiftspear_002"], "hand_counts": {"DARRYL": 7}, "library_counts": {"Rozette": 43, "DARRYL": 43}, "battlefield": {"Rozette": [], "DARRYL": []}, "graveyard": {"Rozette": [], "DARRYL": []}, "stack": [], "land_played_this_turn": false}}}
 {"timestamp": 1786002531.518, "direction": "SENT", "pdu": {"type": "GAME_STATE_UPDATE", "seq_num": 3, "state": {"turn": 0, "phase": "MULLIGAN", "active_player": "Rozette", "life_totals": {"Rozette": 20, "DARRYL": 20}, "hand": ["monastery_swiftspear_004", "prodigal_sorcerer_001", "counterspell_002", "island_003", "mountain_002", "island_010", "mountain_004"], "hand_counts": {"Rozette": 7}, "library_counts": {"Rozette": 43, "DARRYL": 43}, "battlefield": {"Rozette": [], "DARRYL": []}, "graveyard": {"Rozette": [], "DARRYL": []}, "stack": [], "land_played_this_turn": false}}}
 {"timestamp": 1786002533.654, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 2, "timestamp": 1786002533.6531413}}
@@ -15,3 +43,6 @@
 {"timestamp": 1786002713.662, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786002713.6606085}}
 {"timestamp": 1786002741.562, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 8, "timestamp": 1786002741.5604355}}
 {"timestamp": 1786002743.665, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 9, "timestamp": 1786002743.663515}}
+>>>>>>> 9a27f75 (Rozette: Confirm no hidden information ever leaks into an opponent's `GAME_STATE_UPDATE`)
+{"timestamp": 1786084326.385, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 19, "timestamp": 1786084326.3835258}}
+{"timestamp": 1786084326.921, "direction": "SENT", "pdu": {"type": "PONG", "seq_num": 19, "timestamp": 1786084326.9201634}}

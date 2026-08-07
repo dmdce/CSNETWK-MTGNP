@@ -10,6 +10,7 @@ class InvalidPduError(Exception):
 
 def send_pdu(sock, pdu, filename="server_stream.jsonl"):
     """Serializes a PDU, logs it, and sends it with a 4-byte length prefix."""
+
     # 1. Log outgoing PDU
     log_pdu(pdu, direction="SENT", filename=filename)
 
