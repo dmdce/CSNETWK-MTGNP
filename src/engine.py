@@ -15,6 +15,18 @@ CARD_EFFECTS = {
     "goblin_guide": {"kind": "CREATURE", "power": 2, "toughness": 2, "haste": True},
 }
 
+LAND_PREFIXES = ("mountain", "island", "swamp", "forest", "plains")
+INSTANT_PREFIXES = (
+    "lightning_bolt", "shock", "searing_spear", "skullcrack", "incinerate",
+    "counterspell", "cancel", "unsummon", "negate", "mana_leak",
+    "giant_growth", "naturalize", "vines_of_vastwood",
+    "swords_to_plowshares", "path_to_exile", "healing_salve",
+    "dark_ritual", "terror", "doom_blade",
+)
+SORCERY_PREFIXES = (
+    "lava_spike", "flame_slash", "rift_bolt", "ponder", "rampant_growth",
+    "raise_dead", "mind_rot",
+)
 
 class GameEngine:
     def __init__(self, server):
@@ -34,6 +46,10 @@ class GameEngine:
         self.priority_sequence = None
         self.consecutive_passes = 0
         self.turn_manager = None
+        self.pending_triggers = []
+        self.pending_trigger_choice = None
+        self.pending_trigger_order = None
+        self.deferred_priority_player = None
 
     def reset_state(self):
         """
@@ -50,6 +66,10 @@ class GameEngine:
         self.priority_sequence = None
         self.consecutive_passes = 0
         self.turn_manager = None
+        self.pending_triggers = []
+        self.pending_trigger_choice = None
+        self.pending_trigger_order = None
+        self.deferred_priority_player = None
 
     def start_game_setup(self):
         """
@@ -175,6 +195,10 @@ class GameEngine:
                     self.handle_play_land(player_id, pdu)
                 case "ACTIVATE_ABILITY":
                     self.handle_activate_ability(player_id, pdu)
+                case "TRIGGER_ORDER_RESPONSE":
+                    self.handle_trigger_order_response(player_id, pdu)
+                case "TRIGGER_CHOICE_RESPONSE":
+                    self.handle_trigger_choice_response(player_id, pdu)
                 case "DISCARD":
                     self.handle_discard(player_id, pdu)
                 case "CONCEDE":
@@ -255,6 +279,7 @@ class GameEngine:
         for from_phase, to_phase in self.turn_manager.begin_game():
             self.state["phase"] = to_phase
             self.broadcast_phase_transition(from_phase, to_phase)
+            self.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": to_phase})
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
         self.grant_priority(self.state["active_player"])
@@ -475,7 +500,12 @@ class GameEngine:
         else:
             result = "RESOLVED"
             state_changes = self._apply_stack_effect(item, legal_targets)
-        if item.item_type == "SPELL" and item.effect.get("kind") != "CREATURE":
+            if any(change.get("change_type") == "ENTER_BATTLEFIELD" for change in state_changes):
+                self.queue_trigger_event("PERMANENT_ETB", {
+                    "source_id": item.source_id,
+                    "controller_id": item.controller_id,
+                })
+        if item.item_type == "SPELL" and item.effect.get("kind") not in {"CREATURE", "PERMANENT"}:
             self.state["graveyard"][item.controller].append(item.source)
 
         stack_resolve_pdu = {
@@ -509,12 +539,18 @@ class GameEngine:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "The selected card is not in your hand.", pdu)
             return
         effect = self._effect_for(card_id)
-        if effect.get("sorcery", effect.get("kind") == "CREATURE") and not self.turn_manager.is_sorcery_speed(player_id):
+        if effect.get("sorcery", effect.get("kind") in {"CREATURE", "PERMANENT"}) and not self.turn_manager.is_sorcery_speed(player_id):
             self.server.send_error(player_id, "WRONG_PHASE", "This spell may only be cast at sorcery speed.", pdu)
+            return
+        if effect.get("kind") == "LAND":
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Lands must be played with PLAY_LAND.", pdu)
             return
         targets = pdu.get("targets", [])
         if effect.get("kind") in {"DAMAGE", "COUNTER"} and not targets:
             self.server.send_error(player_id, "ILLEGAL_TARGET", "This spell requires a target.", pdu)
+            return
+        if any(not self.turn_manager.target_is_legal(target) for target in targets):
+            self.server.send_error(player_id, "ILLEGAL_TARGET", "One or more selected targets are illegal.", pdu)
             return
         try:
             self.turn_manager.pay_mana(player_id, pdu.get("mana_payment", {}))
@@ -525,6 +561,7 @@ class GameEngine:
         self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
         item = self.turn_manager.push("SPELL", card_id, player_id, targets, effect)
         self.server.broadcast({"type": "STACK_PUSH", "seq_num": self.server.get_next_sequence_number(), **item.public()})
+        self.queue_trigger_event("SPELL_CAST", {"source_id": card_id, "controller_id": player_id})
         self.send_personalized_state_update()
         self.grant_priority(player_id)
 
@@ -536,13 +573,20 @@ class GameEngine:
         @param: pdu (dict): The PLAY_LAND PDU.
         """
 
-        if not self._validate_priority_action(player_id, pdu):
+        if player_id != self.state.get("active_player"):
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Only the active player may play a land.", pdu)
+            return
+        expected_seq = self.server.players.get(player_id, {}).get("last_seq_sent") or self.priority_sequence
+        if pdu.get("seq_num") != expected_seq:
+            self.server.send_error(player_id, "STALE_ACTION",
+                                   f"Expected sequence number {expected_seq}, but got {pdu.get('seq_num')}.", pdu)
             return
         try:
             self.turn_manager.play_land(player_id, pdu.get("card_id"))
         except GameRuleError as error:
             self.server.send_error(player_id, error.code, error.message, pdu)
             return
+        self.queue_trigger_event("PERMANENT_ETB", {"source_id": pdu.get("card_id"), "controller_id": player_id})
         self.send_personalized_state_update()
         self.grant_priority(player_id)
 
@@ -563,21 +607,36 @@ class GameEngine:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Ability source is not under your control.", pdu)
             return
         payment = pdu.get("cost_payment", {})
-        if payment.get("tap") and permanent.get("tapped"):
-            self.server.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
-            return
-        if payment.get("tap"):
-            permanent["tapped"] = True
         abilities = permanent.get("abilities", [])
         ability_index = pdu.get("ability_index")
         if not isinstance(ability_index, int) or ability_index < 0 or ability_index >= len(abilities):
-            if payment.get("tap"):
-                permanent["tapped"] = False
             self.server.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
             return
+        if payment.get("tap") and permanent.get("tapped"):
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "The ability source is already tapped.", pdu)
+            return
+        targets = pdu.get("targets", [])
+        if any(not self.turn_manager.target_is_legal(target) for target in targets):
+            self.server.send_error(player_id, "ILLEGAL_TARGET", "One or more selected targets are illegal.", pdu)
+            return
+        try:
+            self.turn_manager.pay_mana(player_id, pdu.get("mana_payment", payment.get("mana", {})))
+        except GameRuleError as error:
+            self.server.send_error(player_id, error.code, error.message, pdu)
+            return
+        if payment.get("tap"):
+            permanent["tapped"] = True
+        # abilities = permanent.get("abilities", [])
+        # ability_index = pdu.get("ability_index")
+        # if not isinstance(ability_index, int) or ability_index < 0 or ability_index >= len(abilities):
+        #     if payment.get("tap"):
+        #         permanent["tapped"] = False
+        #     self.server.send_error(player_id, "ILLEGAL_ACTION", "ability_index does not identify an ability.", pdu)
+        #     return
         item = self.turn_manager.push("ABILITY", source_id, player_id, pdu.get("targets", []),
                                       abilities[ability_index])
         self.server.broadcast({"type": "STACK_PUSH", "seq_num": self.server.get_next_sequence_number(), **item.public()})
+        self.queue_trigger_event("ABILITY_CAST", {"source_id": source_id, "controller_id": player_id})
         self.send_personalized_state_update()
         self.grant_priority(player_id)
 
@@ -604,6 +663,12 @@ class GameEngine:
             return
 
         self.broadcast_phase_transition(from_phase, to_phase)
+        self.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": to_phase})
+        if to_phase == "DRAW" and self.state["turn"] != 1:
+            if self.turn_manager.last_draw_failed:
+                self.game_over(self.state["active_player"], "DECK_EMPTY")
+                return
+            self.queue_trigger_event("CARD_DRAWN", {"player_id": self.state["active_player"]})
         if to_phase == "CLEANUP":
             self.send_personalized_state_update()
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
@@ -626,7 +691,16 @@ class GameEngine:
         for prefix, effect in CARD_EFFECTS.items():
             if name.startswith(prefix):
                 return dict(effect)
-        return {}
+        if name.startswith(LAND_PREFIXES):
+            return {"kind": "LAND"}
+        if name.startswith(INSTANT_PREFIXES):
+            return {"kind": "INSTANT"}
+        if name.startswith(SORCERY_PREFIXES):
+            return {"kind": "SORCERY", "sorcery": True}
+        # The remaining fixed-catalog cards are creatures, enchantments, or
+        # artifacts. Their card-specific effects are intentionally outside this
+        # change, but their permanent/sorcery-speed behavior is still enforced.
+        return {"kind": "PERMANENT", "sorcery": True}
 
     def _apply_stack_effect(self, item, legal_targets):
         """
@@ -658,18 +732,195 @@ class GameEngine:
                     self.state["graveyard"][countered.controller].append(countered.source)
                     changes.append({"change_type": "COUNTER", "target": target})
                     break
-        elif effect.get("kind") == "CREATURE":
-            self.state["battlefield"][item.controller].append({
+        elif effect.get("kind") in {"CREATURE", "PERMANENT"}:
+            permanent = {
                 "id": item.source,
                 "controller_id": item.controller,
                 "tapped": False,
-                "damage": 0,
-                "power": effect["power"],
-                "toughness": effect["toughness"],
-                "summoning_sick": not effect.get("haste", False),
-            })
+            }
+            if effect.get("kind") == "CREATURE":
+                permanent.update({
+                    "damage": 0,
+                    "power": effect["power"],
+                    "toughness": effect["toughness"],
+                    "summoning_sick": not effect.get("haste", False),
+                })
+            self.state["battlefield"][item.controller].append(permanent)
             changes.append({"change_type": "ENTER_BATTLEFIELD", "target": item.source})
         return changes
+
+    def _battlefield_permanents(self):
+        """Return trigger sources with an explicit controller on every item."""
+        permanents = []
+        for player_id, battlefield in self.state["battlefield"].items():
+            for permanent in battlefield:
+                if isinstance(permanent, dict):
+                    source = dict(permanent)
+                    source.setdefault("controller_id", player_id)
+                    permanents.append(source)
+        return permanents
+
+    def queue_trigger_event(self, event, context=None, departed_permanents=None):
+        """Detect and queue RFC 8.6.1 triggers without granting priority.
+
+        Dev 4 can call this method with ``COMBAT_DAMAGE_DEALT`` after applying
+        combat damage. LTB/dies callers pass the departed permanent snapshots
+        because those cards are no longer present on the battlefield.
+        """
+        sources = self._battlefield_permanents()
+        sources.extend(departed_permanents or [])
+        self.pending_triggers.extend(
+            self.turn_manager.make_triggers(event, sources, context or {})
+        )
+
+    def _send_trigger_choice(self, trigger):
+        seq_num = self.server.get_next_sequence_number()
+        self.pending_trigger_choice = {"trigger": trigger, "seq_num": seq_num}
+        self.server.send_to_player(trigger["controller_id"], {
+            "type": "TRIGGER_CHOICE",
+            "seq_num": seq_num,
+            "trigger_id": trigger["trigger_id"],
+            "source_id": trigger["source_id"],
+            "effect_summary": trigger["effect_summary"],
+            "requires_target": trigger["requires_target"],
+            "legal_targets": trigger["legal_targets"],
+        })
+
+    def _send_trigger_order(self, player_id, triggers):
+        seq_num = self.server.get_next_sequence_number()
+        trigger_ids = [trigger["trigger_id"] for trigger in triggers]
+        self.pending_trigger_order = {
+            "player_id": player_id,
+            "triggers": triggers,
+            "trigger_ids": trigger_ids,
+            "seq_num": seq_num,
+        }
+        self.server.send_to_player(player_id, {
+            "type": "TRIGGER_ORDER",
+            "seq_num": seq_num,
+            "player_id": player_id,
+            "trigger_ids": trigger_ids,
+        })
+
+    def _process_pending_triggers(self, priority_player):
+        """Resolve choices/order, push triggers in APNAP order, then allow priority."""
+        if not self.pending_triggers:
+            self.deferred_priority_player = None
+            return False
+        self.deferred_priority_player = priority_player
+        if self.pending_trigger_choice or self.pending_trigger_order:
+            return True
+
+        # A mandatory targeted trigger with no legal target disappears without
+        # a prompt or STACK_PUSH, as required by RFC 8.6.4.
+        self.pending_triggers = [
+            trigger for trigger in self.pending_triggers
+            if not (trigger["requires_target"] and not trigger["legal_targets"])
+        ]
+        for trigger in self.pending_triggers:
+            needs_choice = trigger["optional"] or trigger["requires_target"]
+            if needs_choice and not trigger["choice_resolved"]:
+                self._send_trigger_choice(trigger)
+                return True
+
+        # AP chooses within their group first, then NAP. The groups themselves
+        # remain AP then NAP so NAP triggers occupy the top of the stack.
+        for controller_id in (self.state["active_player"],
+                              self.turn_manager.opponent(self.state["active_player"])):
+            group = [trigger for trigger in self.pending_triggers
+                     if trigger["controller_id"] == controller_id]
+            if len(group) == 1:
+                group[0]["order_resolved"] = True
+            elif len(group) >= 2 and not all(trigger["order_resolved"] for trigger in group):
+                self._send_trigger_order(controller_id, group)
+                return True
+
+        for trigger in self.turn_manager.apnap_order(self.pending_triggers):
+            targets = [trigger["chosen_target"]] if trigger["chosen_target"] is not None else []
+            item = self.turn_manager.push(
+                "TRIGGER_ABILITY", trigger["source_id"], trigger["controller_id"],
+                targets, trigger["effect"]
+            )
+            self.server.broadcast({
+                "type": "STACK_PUSH",
+                "seq_num": self.server.get_next_sequence_number(),
+                **item.public(),
+            })
+        self.pending_triggers = []
+        self.deferred_priority_player = None
+        self.send_personalized_state_update()
+        return False
+
+    def handle_trigger_choice_response(self, player_id, pdu):
+        pending = self.pending_trigger_choice
+        trigger = pending["trigger"] if pending else None
+        try:
+            if not pending or player_id != trigger["controller_id"] or pdu.get("seq_num") != pending["seq_num"]:
+                raise GameRuleError("TRIGGER_CHOICE_INVALID", "Response does not match the pending trigger choice.")
+            self.turn_manager.validate_trigger_choice(
+                trigger, pdu.get("trigger_id"), pdu.get("accept"), pdu.get("chosen_target")
+            )
+        except GameRuleError as error:
+            self.server.send_error(player_id, error.code, error.message, pdu, pdu.get("seq_num"))
+            if pending:
+                self.server.send_to_player(player_id, {
+                    "type": "TRIGGER_CHOICE", "seq_num": pending["seq_num"],
+                    "trigger_id": trigger["trigger_id"], "source_id": trigger["source_id"],
+                    "effect_summary": trigger["effect_summary"],
+                    "requires_target": trigger["requires_target"],
+                    "legal_targets": trigger["legal_targets"],
+                })
+            return
+
+        self.pending_trigger_choice = None
+        if not pdu["accept"]:
+            self.pending_triggers.remove(trigger)
+        else:
+            trigger["choice_resolved"] = True
+            trigger["chosen_target"] = pdu.get("chosen_target")
+        priority_player = self.deferred_priority_player
+        if not self._process_pending_triggers(priority_player):
+            self.grant_priority(priority_player)
+
+    def handle_trigger_order_response(self, player_id, pdu):
+        pending = self.pending_trigger_order
+        try:
+            if not pending or player_id != pending["player_id"] or pdu.get("seq_num") != pending["seq_num"]:
+                raise GameRuleError("TRIGGER_ORDER_INVALID", "Response does not match the pending trigger order.")
+            self.turn_manager.validate_trigger_order(
+                pending["trigger_ids"], pdu.get("ordered_trigger_ids", [])
+            )
+        except GameRuleError as error:
+            self.server.send_error(player_id, error.code, error.message, pdu, pdu.get("seq_num"))
+            if pending:
+                self.server.send_to_player(player_id, {
+                    "type": "TRIGGER_ORDER", "seq_num": pending["seq_num"],
+                    "player_id": player_id, "trigger_ids": pending["trigger_ids"],
+                })
+            return
+
+        by_id = {trigger["trigger_id"]: trigger for trigger in pending["triggers"]}
+        ordered = [by_id[trigger_id] for trigger_id in pdu["ordered_trigger_ids"]]
+        for trigger in ordered:
+            trigger["order_resolved"] = True
+        group_positions = [index for index, trigger in enumerate(self.pending_triggers)
+                           if trigger["controller_id"] == player_id]
+        for index, trigger in zip(group_positions, ordered):
+            self.pending_triggers[index] = trigger
+        self.pending_trigger_order = None
+        priority_player = self.deferred_priority_player
+        if not self._process_pending_triggers(priority_player):
+            self.grant_priority(priority_player)
+
+    def notify_combat_damage(self, context=None):
+        """Dev 4 integration hook: call after combat damage has been applied."""
+        self.queue_trigger_event("COMBAT_DAMAGE_DEALT", context or {})
+        self.grant_priority(self.state["active_player"])
+
+    def notify_permanent_left(self, permanent, died=False):
+        """Integration hook for destroy/exile/bounce/sacrifice operations."""
+        event = "CREATURE_DIED" if died else "PERMANENT_LTB"
+        self.queue_trigger_event(event, {"source_id": permanent.get("id")}, [dict(permanent)])
 
     def grant_priority(self, player_id):
         """
@@ -679,6 +930,9 @@ class GameEngine:
         """
 
         if self.check_state_based_actions():
+            return
+        if self._process_pending_triggers(player_id):
+            self.state["priority_holder"] = None
             return
 
         self.state["priority_holder"] = player_id
@@ -694,7 +948,19 @@ class GameEngine:
 
         logger.debug(f"Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
-
+        
+    # def send_error(self, player_id, code, message, pdu, seq=None):
+    #     error_pdu = {
+    #         "type": "ERROR",
+    #         "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
+    #         "code": code,
+    #         "message": message,
+    #         "rejected_action": pdu
+    #     }
+    #
+    #     print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
+    #     self.server.send_to_player(player_id, error_pdu)
+    
     def regrant_priority(self, player_id):
         """
         name: regrant_priority
@@ -724,7 +990,14 @@ class GameEngine:
         if self.server.phase != "IN_GAME":
             return False
         if self.turn_manager:
-            self.turn_manager.apply_state_based_actions()
+            sba_changes = self.turn_manager.apply_state_based_actions()
+            departed = [change["permanent"] for change in sba_changes]
+            for permanent in departed:
+                # Each death is a distinct event. A "whenever a creature dies"
+                # ability therefore triggers once per creature, even when SBAs
+                # move several creatures simultaneously.
+                self.queue_trigger_event("PERMANENT_LTB", {"permanent": permanent}, [permanent])
+                self.queue_trigger_event("CREATURE_DIED", {"creature": permanent}, [permanent])
         p1, p2 = self.player_ids[0], self.player_ids[1]
         life_p1 = self.state["life_totals"][p1]
         life_p2 = self.state["life_totals"][p2]
@@ -756,6 +1029,11 @@ class GameEngine:
         if self.state["phase"] != "CLEANUP" or player_id != ap:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Can only discard during your cleanup step.", pdu, seq)
             return
+        expected_seq = self.server.players.get(player_id, {}).get("last_seq_sent")
+        if expected_seq is not None and seq != expected_seq:
+            self.server.send_error(player_id, "STALE_ACTION",
+                                   f"Expected sequence number {expected_seq}, but got {seq}.", pdu, seq)
+            return
 
         card_ids = pdu.get("card_ids", [])
         hand = self.state["hand"][player_id]
@@ -773,6 +1051,7 @@ class GameEngine:
             return
 
         self.state["hand"][player_id] = temp_hand
+        self.state["hand_counts"][player_id] = len(temp_hand)
         self.state["graveyard"][player_id].extend(card_ids)
 
         if len(self.state["hand"][player_id]) > 7:
@@ -794,6 +1073,7 @@ class GameEngine:
         for from_phase, to_phase in transitions:
             self.state["phase"] = to_phase
             self.broadcast_phase_transition(from_phase, to_phase)
+            self.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": to_phase})
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
         self.grant_priority(self.state["active_player"])
