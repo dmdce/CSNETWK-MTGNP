@@ -26,6 +26,7 @@ class MTGNPClient:
         self.sock = None
         self.seq_num = 0
         self.last_ping_seq = -1
+        self.server_seq_num = None
         self.last_server_seq = 0         # Sequence number received from server's latest state update
         self.mulligan_count = 0          # Number of mulligans taken in current game
         self.current_hand = []           # Local tracking of drawn hand
@@ -133,7 +134,7 @@ class MTGNPClient:
                 self.mulligan_count += 1
                 pdu = {
                     "type": "MULLIGAN_CHOICE",
-                    "seq_num": self.last_server_seq,
+                    "seq_num": self.server_seq_num,
                     "keep": False,
                     "cards_to_bottom": []
                 }
@@ -159,7 +160,7 @@ class MTGNPClient:
 
                 pdu = {
                     "type": "MULLIGAN_CHOICE",
-                    "seq_num": self.last_server_seq,
+                    "seq_num": self.server_seq_num,
                     "keep": True,
                     "cards_to_bottom": provided_cards
                 }
@@ -330,6 +331,10 @@ class MTGNPClient:
         """
 
         p_type = pdu.get("type")
+
+        # Capture seq_num from server PDU (GAME_STATE_UPDATE, PRIORITY_GRANT, ...)
+        if p_type in ("GAME_STATE_UPDATE", "PRIORITY_GRANT", "PHASE_TRANSITION"):
+            self.server_seq_num = pdu.get("seq_num")
 
         # Track incoming server sequence numbers to echo back in Mulligan choices
         if "seq_num" in pdu:
