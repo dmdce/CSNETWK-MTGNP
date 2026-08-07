@@ -36,18 +36,28 @@ class GameRuleError(Exception):
 class StackItem:
     stack_item_id: str
     item_type: str
-    source: str
-    controller: str
+    source_id: str
+    controller_id: str
     targets: list = field(default_factory=list)
     effect: dict = field(default_factory=dict)
+
+    # Compatibility properties keep existing resolution code readable while
+    # the public/state representation uses the RFC Section 8.3 field names.
+    @property
+    def source(self):
+        return self.source_id
+
+    @property
+    def controller(self):
+        return self.controller_id
 
     def public(self):
         return {
             "stack_item_id": self.stack_item_id,
             "item_type": self.item_type,
-            "source": self.source,
+            "source_id": self.source_id,
             "targets": list(self.targets),
-            "controller": self.controller,
+            "controller_id": self.controller_id,
         }
 
 
@@ -62,6 +72,7 @@ class TurnManager:
         self._stack_ids = count(1)
         self._trigger_ids = count(1)
         self.pending_trigger_decisions = {}
+        self.last_draw_failed = False
 
     @property
     def active_player(self):
@@ -111,7 +122,9 @@ class TurnManager:
         self.state["phase"] = new
         self.state["priority_holder"] = None
         if new == "DRAW" and self.state["turn"] != 1:
-            self.draw_card(self.active_player)
+            self.last_draw_failed = not self.draw_card(self.active_player)
+        else:
+            self.last_draw_failed = False
         return old, new
 
     def draw_card(self, player_id):
@@ -217,27 +230,63 @@ class TurnManager:
                             permanent["toughness"] <= 0
                             or permanent.get("damage", 0) >= permanent["toughness"]):
                         card_id = permanent.get("id")
-                        self.state["graveyard"][player_id].append(card_id)
-                        changes.append({"change_type": "DESTROY", "target": card_id})
+                        graveyard_owner = permanent.get("owner_id", player_id)
+                        self.state["graveyard"][graveyard_owner].append(card_id)
+                        permanent_snapshot = dict(permanent)
+                        permanent_snapshot.setdefault("controller_id", player_id)
+                        changes.append({
+                            "change_type": "DESTROY",
+                            "target": card_id,
+                            "controller_id": permanent.get("controller_id", player_id),
+                            "permanent": permanent_snapshot,
+                        })
                         changed = True
                     else:
                         survivors.append(permanent)
                 self.state["battlefield"][player_id] = survivors
         return changes
 
-    def make_triggers(self, event, permanents):
-        """Detect catalog-provided triggers matching a game event."""
+    def make_triggers(self, event, permanents, event_context=None):
+        """Detect catalog-provided triggers matching a game event.
+
+        A permanent may declare ``event`` as a string or ``events`` as a list.
+        This keeps the detector independent of the eventual shared card
+        catalog while supporting every event required by RFC 8.6.1.
+        """
         triggers = []
+        event_context = event_context or {}
+        event_aliases = {
+            "PERMANENT_ETB": {"PERMANENT_ETB", "ETB"},
+            "PERMANENT_LTB": {"PERMANENT_LTB", "LTB"},
+            "CREATURE_DIED": {"CREATURE_DIED", "DIES"},
+            "SPELL_CAST": {"SPELL_CAST", "SPELL_ABILITY_CAST", "CAST"},
+            "ABILITY_CAST": {"ABILITY_CAST", "SPELL_ABILITY_CAST", "CAST"},
+            "CARD_DRAWN": {"CARD_DRAWN", "DRAW"},
+            "STEP_PHASE_BEGIN": {
+                "STEP_PHASE_BEGIN", "PHASE_BEGIN", event_context.get("phase"),
+                f"BEGIN_{event_context.get('phase')}" if event_context.get("phase") else None,
+            },
+            "COMBAT_DAMAGE_DEALT": {"COMBAT_DAMAGE_DEALT", "COMBAT_DAMAGE"},
+        }
+        matching_events = event_aliases.get(event, {event})
         for permanent in permanents:
             for ability in permanent.get("triggered_abilities", []):
-                if ability.get("event") == event:
+                accepted_events = ability.get("events", [ability.get("event")])
+                if isinstance(accepted_events, str):
+                    accepted_events = [accepted_events]
+                if matching_events.intersection(accepted_events):
                     triggers.append({
                         "trigger_id": f"trg_{next(self._trigger_ids):04d}",
                         "source_id": permanent.get("id"),
                         "controller_id": permanent.get("controller_id"),
                         "optional": ability.get("optional", False),
                         "requires_target": ability.get("requires_target", False),
+                        "effect_summary": ability.get("effect_summary", "Triggered ability"),
+                        "legal_targets": list(ability.get("legal_targets", event_context.get("legal_targets", []))),
                         "effect": ability.get("effect", {}),
+                        "chosen_target": None,
+                        "choice_resolved": False,
+                        "order_resolved": False,
                     })
         return triggers
 
@@ -248,5 +297,18 @@ class TurnManager:
 
     @staticmethod
     def validate_trigger_order(expected_ids, ordered_ids):
-        if len(expected_ids) != len(ordered_ids) or sorted(expected_ids) != sorted(ordered_ids):
+        if (not isinstance(ordered_ids, list)
+                or any(not isinstance(trigger_id, str) for trigger_id in ordered_ids)
+                or len(expected_ids) != len(ordered_ids)
+                or sorted(expected_ids) != sorted(ordered_ids)):
             raise GameRuleError("TRIGGER_ORDER_INVALID", "Each pending trigger must appear exactly once.")
+
+    @staticmethod
+    def validate_trigger_choice(trigger, trigger_id, accept, chosen_target):
+        if trigger is None or trigger.get("trigger_id") != trigger_id or not isinstance(accept, bool):
+            raise GameRuleError("TRIGGER_CHOICE_INVALID", "Response does not match the pending trigger choice.")
+        if not trigger.get("optional") and not accept:
+            raise GameRuleError("TRIGGER_CHOICE_INVALID", "A mandatory trigger cannot be declined.")
+        if accept and trigger.get("requires_target"):
+            if chosen_target not in trigger.get("legal_targets", []):
+                raise GameRuleError("TRIGGER_CHOICE_INVALID", "chosen_target is not legal for this trigger.")

@@ -5,6 +5,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from turn_manager import GameRuleError, TurnManager
+from engine import GameEngine
 
 
 def game_state():
@@ -57,6 +58,12 @@ class TurnManagerTests(unittest.TestCase):
         self.assertEqual("RESOLVE", self.manager.pass_priority("p2"))
         self.assertEqual(second.stack_item_id, self.manager.pop().stack_item_id)
 
+    def test_stack_uses_required_public_field_names(self):
+        item = self.manager.push("SPELL", "shock_001", "p1", ["p2"])
+        self.assertEqual({
+            "stack_item_id", "item_type", "source_id", "controller_id", "targets"
+        }, set(item.public()))
+
     def test_land_play_is_sorcery_speed_and_once_per_turn(self):
         self.manager.begin_game()
         self.state["phase"] = "PRECOMBAT_MAIN"
@@ -108,6 +115,157 @@ class TurnManagerTests(unittest.TestCase):
         with self.assertRaises(GameRuleError) as error:
             self.manager.validate_trigger_order(["a1", "a2"], ["a1", "a1"])
         self.assertEqual("TRIGGER_ORDER_INVALID", error.exception.code)
+
+    def test_trigger_detection_supports_required_event_aliases(self):
+        permanent = {
+            "id": "watcher_001",
+            "controller_id": "p1",
+            "triggered_abilities": [{"event": "DIES", "effect": {"kind": "DRAW"}}],
+        }
+        triggers = self.manager.make_triggers("CREATURE_DIED", [permanent])
+        self.assertEqual(1, len(triggers))
+        self.assertEqual("watcher_001", triggers[0]["source_id"])
+
+
+class FakeServer:
+    def __init__(self):
+        self.phase = "IN_GAME"
+        self.seq_num = 0
+        self.players = {
+            "p1": {"status": "CONNECTED", "last_seq_sent": None},
+            "p2": {"status": "CONNECTED", "last_seq_sent": None},
+        }
+        self.sent = []
+        self.broadcasts = []
+        self.errors = []
+
+    def get_next_sequence_number(self):
+        self.seq_num += 1
+        return self.seq_num
+
+    def send_to_player(self, player_id, pdu):
+        self.sent.append((player_id, pdu))
+        self.players[player_id]["last_seq_sent"] = pdu.get("seq_num")
+
+    def broadcast(self, pdu):
+        self.broadcasts.append(pdu)
+
+    def send_error(self, player_id, code, message, rejected_action=None, seq=None):
+        self.errors.append((player_id, code, message, rejected_action, seq))
+
+
+class EngineIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.server = FakeServer()
+        self.engine = GameEngine(self.server)
+        self.engine.player_ids = ["p1", "p2"]
+        self.engine.state = game_state()
+        self.engine.state["phase"] = "PRECOMBAT_MAIN"
+        self.engine.turn_manager = TurnManager(self.engine.state, self.engine.player_ids)
+        self.engine.priority_sequence = 7
+
+    def test_land_play_does_not_require_current_priority(self):
+        self.engine.state["priority_holder"] = "p2"
+        self.engine.handle_play_land("p1", {
+            "type": "PLAY_LAND", "seq_num": 7, "card_id": "mountain_001"
+        })
+        self.assertTrue(self.engine.state["land_played_this_turn"])
+        self.assertEqual("p1", self.engine.state["priority_holder"])
+        self.assertEqual([], self.server.errors)
+
+    def test_optional_trigger_blocks_priority_until_response(self):
+        self.engine.state["battlefield"]["p1"] = [{
+            "id": "watcher_001",
+            "controller_id": "p1",
+            "triggered_abilities": [{
+                "event": "DRAW", "optional": True,
+                "effect_summary": "You may gain 1 life.",
+                "effect": {"kind": "LIFE_GAIN", "amount": 1},
+            }],
+        }]
+        self.engine.queue_trigger_event("CARD_DRAWN", {"player_id": "p1"})
+        self.engine.grant_priority("p1")
+        choice = self.server.sent[-1][1]
+        self.assertEqual("TRIGGER_CHOICE", choice["type"])
+        self.assertIsNone(self.engine.state["priority_holder"])
+
+        self.engine.handle_trigger_choice_response("p1", {
+            "type": "TRIGGER_CHOICE_RESPONSE",
+            "seq_num": choice["seq_num"],
+            "trigger_id": choice["trigger_id"],
+            "accept": False,
+        })
+        self.assertEqual("PRIORITY_GRANT", self.server.sent[-1][1]["type"])
+        self.assertEqual([], self.engine.state["stack"])
+
+    def test_invalid_trigger_choice_reports_specific_error(self):
+        self.engine.state["battlefield"]["p1"] = [{
+            "id": "watcher_001", "controller_id": "p1",
+            "triggered_abilities": [{
+                "event": "ETB", "requires_target": True,
+                "legal_targets": ["p2"], "effect": {"kind": "DAMAGE"},
+            }],
+        }]
+        self.engine.queue_trigger_event("PERMANENT_ETB")
+        self.engine.grant_priority("p1")
+        choice = self.server.sent[-1][1]
+        self.engine.handle_trigger_choice_response("p1", {
+            "type": "TRIGGER_CHOICE_RESPONSE", "seq_num": choice["seq_num"],
+            "trigger_id": choice["trigger_id"], "accept": True,
+            "chosen_target": "not-a-target",
+        })
+        self.assertEqual("TRIGGER_CHOICE_INVALID", self.server.errors[-1][1])
+        self.assertEqual("TRIGGER_CHOICE", self.server.sent[-1][1]["type"])
+
+    def test_activated_ability_mana_failure_is_atomic(self):
+        source = {
+            "id": "artifact_001", "tapped": False,
+            "abilities": [{"kind": "ABILITY"}],
+        }
+        mountain = {"id": "mountain_002", "tapped": False}
+        self.engine.state["battlefield"]["p1"] = [source, mountain]
+        self.engine.state["priority_holder"] = "p1"
+        self.engine.handle_activate_ability("p1", {
+            "type": "ACTIVATE_ABILITY", "seq_num": 7,
+            "source_id": "artifact_001", "ability_index": 0,
+            "targets": [], "mana_payment": {"R": 2},
+            "cost_payment": {"tap": True},
+        })
+        self.assertEqual("INSUFFICIENT_MANA", self.server.errors[-1][1])
+        self.assertFalse(source["tapped"])
+        self.assertFalse(mountain["tapped"])
+
+    def test_two_simultaneous_triggers_require_order_before_priority(self):
+        self.engine.state["battlefield"]["p1"] = [{
+            "id": "watcher_001", "controller_id": "p1",
+            "triggered_abilities": [
+                {"event": "UPKEEP", "effect": {"kind": "FIRST"}},
+                {"event": "UPKEEP", "effect": {"kind": "SECOND"}},
+            ],
+        }]
+        self.engine.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": "UPKEEP"})
+        self.engine.grant_priority("p1")
+        order = self.server.sent[-1][1]
+        self.assertEqual("TRIGGER_ORDER", order["type"])
+        self.assertFalse(any(pdu["type"] == "PRIORITY_GRANT" for _, pdu in self.server.sent))
+
+        reversed_ids = list(reversed(order["trigger_ids"]))
+        effects_by_trigger = {
+            trigger["trigger_id"]: trigger["effect"]["kind"]
+            for trigger in self.engine.pending_triggers
+        }
+        self.engine.handle_trigger_order_response("p1", {
+            "type": "TRIGGER_ORDER_RESPONSE",
+            "seq_num": order["seq_num"],
+            "ordered_trigger_ids": reversed_ids,
+        })
+        actual_effect_order = [
+            self.engine.turn_manager.stack_items[item["stack_item_id"]].effect["kind"]
+            for item in self.engine.state["stack"]
+        ]
+        self.assertEqual([effects_by_trigger[trigger_id] for trigger_id in reversed_ids],
+                         actual_effect_order)
+        self.assertEqual("PRIORITY_GRANT", self.server.sent[-1][1]["type"])
 
 
 if __name__ == "__main__":
