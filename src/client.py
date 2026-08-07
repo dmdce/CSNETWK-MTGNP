@@ -363,9 +363,9 @@ class MTGNPClient:
                 print(f"Your Hand ({len(self.current_hand)} cards): {self.current_hand}")
                 print(f"Times Mulliganed: {self.mulligan_count}")
                 if self.mulligan_count > 0:
-                    print(f"👉 Enter command: 'keep <card_id1> ...' ({self.mulligan_count} card(s) to bottom) OR 'mulligan'")
+                    print(f"Enter command: 'discard <card_id1> ...' ({self.mulligan_count} card(s) to bottom) OR 'mulligan'")
                 else:
-                    print(f"👉 Enter command: 'keep' OR 'mulligan'")
+                    print(f"Enter command: 'keep' OR 'mulligan'")
                 print(f"================================================")
 
             else:

@@ -265,6 +265,20 @@ class GameEngine:
         print(f"[engine] Broadcasting PHASE_TRANSITION: {pdu}")
         self.server.broadcast(pdu)
 
+    def transition_to_declare_attackers(self):
+        """
+        name: transition_to_declare_attackers
+        description: Transitions state from BEGIN_COMBAT to DECLARE_ATTACKERS and syncs clients.
+        """
+        from_phase = self.state["phase"]
+        to_phase = "DECLARE_ATTACKERS"
+
+        self.state["phase"] = to_phase
+        self.state["priority_holder"] = None
+
+        self.broadcast_phase_transition(from_phase, to_phase)
+        self.send_personalized_state_update()
+
     def _validate_priority_action(self, player_id, pdu):
         """
         name: _validate_priority_action
@@ -298,10 +312,14 @@ class GameEngine:
 
         if not self._validate_priority_action(player_id, pdu):
             return
-        
+
         try:
             outcome = self.turn_manager.pass_priority(player_id)
         except GameRuleError as error:
+            # Handle combat hand-off exception if pass_priority raises error at phase boundary
+            if self.state.get("phase") == "BEGIN_COMBAT":
+                self.transition_to_declare_attackers()
+                return
             self.server.send_error(player_id, error.code, error.message, pdu)
             return
 
@@ -309,6 +327,8 @@ class GameEngine:
             self.grant_priority(self.state["priority_holder"])
         elif outcome == "RESOLVE":
             self.resolve_top_stack()
+        elif outcome == "DECLARE_ATTACKERS":
+            self.transition_to_declare_attackers()
         else:
             self.advance_phase()
 
@@ -461,9 +481,19 @@ class GameEngine:
 
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
-        except GameRuleError:
-            # BEGIN_COMBAT is the explicit hand-off to Dev 4's combat machine.
+        except GameRuleError as error:
+            if error.code == "DECK_EMPTY":
+                self.game_over(loser_id=self.state["active_player"], reason="DECK_EMPTY")
             return
+
+            # Link begin_combat_step when transitioning into BEGIN_COMBAT
+        if to_phase == "BEGIN_COMBAT":
+            from_phase, to_phase = self.turn_manager.begin_combat_step()
+            self.broadcast_phase_transition(from_phase, to_phase)
+            self.send_personalized_state_update()
+            self.grant_priority(self.state["active_player"])
+            return
+
         self.broadcast_phase_transition(from_phase, to_phase)
         if to_phase == "CLEANUP":
             self.send_personalized_state_update()
