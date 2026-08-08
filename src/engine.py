@@ -370,6 +370,9 @@ class GameEngine:
                                    "Cannot declare blockers outside DECLARE_BLOCKERS step.", pdu)
             return
 
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+
         if player_id == self.state["active_player"]:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Non-active player must declare blockers.", pdu)
             return
@@ -391,8 +394,11 @@ class GameEngine:
         # Broadcast updated state showing "blocking" relations while "tapped" remains False
         self.send_personalized_state_update()
 
-        # Grant priority window before damage resolution
-        self.grant_priority(self.state["active_player"])
+        # Check if phase advanced directly into combat damage
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+        else:
+            self.grant_priority(self.state["active_player"])
 
     def handle_assign_damage_order_pdu(self, player_id, pdu):
         """
@@ -422,7 +428,29 @@ class GameEngine:
         self.send_personalized_state_update()
 
         # Grant priority once all damage orders have been resolved and phase moves to COMBAT_DAMAGE
-        if self.state["phase"] == "COMBAT_DAMAGE":
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+        else:
+            self.grant_priority(self.state["active_player"])
+
+    def handle_combat_damage_phase(self):
+        """
+        Processes combat damage resolution and priority transitions.
+        Called after declare_blockers, assign_damage_order, or phase advancement.
+        """
+        current_phase = self.state.get("phase")
+
+        # --- STEP 1: FIRST STRIKE DAMAGE STEP ---
+        if current_phase == "FIRST_STRIKE_DAMAGE":
+            self.turn_manager.resolve_combat_damage_step(is_first_strike=True)
+            self.send_personalized_state_update()
+            self.grant_priority(self.state["active_player"])
+            return
+
+        # --- STEP 2: REGULAR COMBAT DAMAGE STEP ---
+        if current_phase == "COMBAT_DAMAGE":
+            self.turn_manager.resolve_combat_damage_step(is_first_strike=False)
+            self.send_personalized_state_update()
             self.grant_priority(self.state["active_player"])
 
     def _validate_priority_action(self, player_id, pdu):
@@ -615,11 +643,9 @@ class GameEngine:
 
     def advance_phase(self):
         """
-        name: advance_phase
-        description: Advances the game phase via the TurnManager, broadcasting PHASE_TRANSITION
-                     and granting priority when needed.
+        Advances the game phase via the TurnManager, broadcasting PHASE_TRANSITION
+        and granting priority when needed.
         """
-
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
         except GameRuleError as error:
@@ -627,20 +653,23 @@ class GameEngine:
                 self.game_over(loser_id=self.state["active_player"], reason="DECK_EMPTY")
             return
 
-        # Link begin_combat_step when transitioning into BEGIN_COMBAT
+        # handle BEGIN_COMBAT & other phase transition
         if to_phase == "BEGIN_COMBAT":
             from_phase, to_phase = self.turn_manager.begin_combat()
-            self.broadcast_phase_transition(from_phase, to_phase)
-            self.send_personalized_state_update()
-            self.grant_priority(self.state["active_player"])
+
+        self.state["phase"] = to_phase
+        self.broadcast_phase_transition(from_phase, to_phase)
+
+        if to_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
             return
 
-        self.broadcast_phase_transition(from_phase, to_phase)
         if to_phase == "CLEANUP":
             self.send_personalized_state_update()
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
                 self.end_turn()
             return
+
         self.send_personalized_state_update()
         if to_phase in PRIORITY_STEPS:
             self.grant_priority(self.state["active_player"])

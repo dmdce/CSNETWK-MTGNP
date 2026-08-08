@@ -60,7 +60,6 @@ class StackItem:
             "controller_id": self.controller_id,
         }
 
-
 class TurnManager:
     """Pure rules state machine used by ``GameEngine`` during IN_GAME."""
 
@@ -301,7 +300,7 @@ class TurnManager:
             self.state["pending_damage_orders"] = multiply_blocked
             self.state["damage_orders"] = {}
         else:
-            self.state["phase"] = "COMBAT_DAMAGE"
+            self.check_and_advance_combat_damage_phase()
 
         self.state["priority_holder"] = self.active_player
         return validated_blockers
@@ -330,9 +329,132 @@ class TurnManager:
 
         # Advance phase once all multiply-blocked attackers are resolved
         if not pending:
-            self.state["phase"] = "COMBAT_DAMAGE"
+            self.check_and_advance_combat_damage_phase()
 
         return ordered_blocker_ids
+
+    def get_combat_keywords(self, creature):
+        """Internal helper to extract normalized combat keywords for a creature."""
+        if not isinstance(creature, dict):
+            return set()
+        keywords = set(creature.get("keywords", []))
+        if creature.get("first_strike"):
+            keywords.add("first_strike")
+        if creature.get("double_strike"):
+            keywords.add("double_strike")
+        return keywords
+
+    def has_first_or_double_strike(self, creature):
+        """Helper to check if a creature has first strike or double strike."""
+        kw = self.get_combat_keywords(creature)
+        return "first_strike" in kw or "double_strike" in kw
+
+    def deals_damage_in_step(self, creature, is_first_strike):
+        """
+        Returns True if the creature is eligible to deal combat damage in the current step.
+        - First Strike step: deals damage if it has first_strike or double_strike.
+        - Regular step: deals damage if it lacks first_strike, OR has double_strike.
+        """
+        kw = self.get_combat_keywords(creature)
+        has_fs = "first_strike" in kw or "double_strike" in kw
+        has_ds = "double_strike" in kw
+
+        return has_fs if is_first_strike else (not has_fs or has_ds)
+
+    def check_and_advance_combat_damage_phase(self):
+        """Determines whether combat proceeds to FIRST_STRIKE_DAMAGE or COMBAT_DAMAGE."""
+        ap, nap = self.active_player, self.opponent(self.active_player)
+
+        ap_bf = {c["id"]: c for c in self.state.get("battlefield", {}).get(ap, []) if isinstance(c, dict)}
+        nap_bf = {c["id"]: c for c in self.state.get("battlefield", {}).get(nap, []) if isinstance(c, dict)}
+
+        declared_attackers = self.state.get("declared_attackers", [])
+        declared_blockers = self.state.get("declared_blockers", [])
+
+        att_ids = {a["creature_id"] if isinstance(a, dict) else a for a in declared_attackers}
+        blocker_ids = {b["blocker_id"] for b in declared_blockers if isinstance(b, dict)}
+
+        has_fs = (
+                any(self.has_first_or_double_strike(ap_bf[cid]) for cid in att_ids if cid in ap_bf) or
+                any(self.has_first_or_double_strike(nap_bf[cid]) for cid in blocker_ids if cid in nap_bf)
+        )
+
+        self.state["phase"] = "FIRST_STRIKE_DAMAGE" if has_fs else "COMBAT_DAMAGE"
+        self.state["priority_holder"] = self.active_player
+        return self.state["phase"]
+
+    def resolve_combat_damage_step(self, is_first_strike=False):
+        """
+        Applies damage for either the First Strike or regular Combat Damage step,
+        evaluates SBAs, and advances phase.
+        """
+        ap, nap = self.active_player, self.opponent(self.active_player)
+
+        ap_bf_list = self.state.get("battlefield", {}).get(ap, [])
+        nap_bf_list = self.state.get("battlefield", {}).get(nap, [])
+
+        ap_bf = {c["id"]: c for c in ap_bf_list if isinstance(c, dict)}
+        nap_bf = {c["id"]: c for c in nap_bf_list if isinstance(c, dict)}
+
+        declared_attackers = self.state.get("declared_attackers", [])
+        declared_blockers = self.state.get("declared_blockers", [])
+        damage_orders = self.state.get("damage_orders", {})
+
+        # Map attacker_id -> list of blocker_ids
+        attacker_to_blockers = {}
+        for entry in declared_blockers:
+            if isinstance(entry, dict):
+                attacker_to_blockers.setdefault(entry["attacker_id"], []).append(entry["blocker_id"])
+
+        for att_entry in declared_attackers:
+            att_id = att_entry["creature_id"] if isinstance(att_entry, dict) else att_entry
+            attacker = ap_bf.get(att_id)
+            if not attacker:
+                continue
+
+            attacker_can_damage = self.deals_damage_in_step(attacker, is_first_strike)
+            att_power = max(0, attacker.get("power", 0))
+            blocker_ids = attacker_to_blockers.get(att_id, [])
+
+            # --- UNBLOCKED ATTACKER ---
+            if not blocker_ids:
+                if attacker_can_damage:
+                    self.state["life"][nap] = self.state["life"].get(nap, 20) - att_power
+                continue
+
+            # --- BLOCKED ATTACKER ---
+            ordered_ids = damage_orders.get(att_id, blocker_ids)
+            remaining_power = att_power
+            active_blockers = [nap_bf[bid] for bid in ordered_ids if bid in nap_bf]
+
+            for i, blocker in enumerate(active_blockers):
+                # 1. Blocker deals damage to Attacker
+                if self.deals_damage_in_step(blocker, is_first_strike):
+                    b_power = max(0, blocker.get("power", 0))
+                    attacker["damage"] = attacker.get("damage", 0) + b_power
+
+                # 2. Attacker deals damage to Blocker
+                if attacker_can_damage and remaining_power > 0:
+                    b_toughness = max(0, blocker.get("toughness", 0))
+                    is_last_blocker = (i == len(active_blockers) - 1)
+
+                    assigned = remaining_power if is_last_blocker else min(remaining_power, b_toughness)
+                    blocker["damage"] = blocker.get("damage", 0) + assigned
+                    remaining_power -= assigned
+
+        # --- STATE-BASED ACTIONS (SBAs) ---
+        for owner_id, bf in [(ap, ap_bf_list), (nap, nap_bf_list)]:
+            dead_creatures = [
+                c for c in bf
+                if isinstance(c, dict) and c.get("damage", 0) >= c.get("toughness", 0) > 0
+            ]
+            for dead in dead_creatures:
+                bf.remove(dead)
+                self.state.setdefault("graveyard", {}).setdefault(owner_id, []).append(dead)
+
+        # --- PHASE TRANSITION ---
+        self.state["phase"] = "COMBAT_DAMAGE" if is_first_strike else "POSTCOMBAT_MAIN"
+        self.state["priority_holder"] = self.active_player
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
