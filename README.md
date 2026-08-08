@@ -31,7 +31,7 @@ py server.py [--verbose]
 
 | Argument |	Description |
 | - | - |
-| `--verbose (optional)` | prints all sent/received PDUs and internal logs to the console. |
+| `--verbose` (optional) | prints all sent/received PDUs and internal logs to the console. |
 
 #### Example
 ```bash
