@@ -440,17 +440,39 @@ class GameEngine:
         """
         current_phase = self.state.get("phase")
 
-        # --- STEP 1: FIRST STRIKE DAMAGE STEP ---
-        if current_phase == "FIRST_STRIKE_DAMAGE":
-            self.turn_manager.resolve_combat_damage_step(is_first_strike=True)
-            self.send_personalized_state_update()
-            self.grant_priority(self.state["active_player"])
-            return
+        if current_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            is_first_strike = (current_phase == "FIRST_STRIKE_DAMAGE")
 
-        # --- STEP 2: REGULAR COMBAT DAMAGE STEP ---
-        if current_phase == "COMBAT_DAMAGE":
-            self.turn_manager.resolve_combat_damage_step(is_first_strike=False)
+            # Resolve combat damage via TurnManager
+            result = self.turn_manager.resolve_combat_damage_step(is_first_strike=is_first_strike)
+
+            # 1. Broadcast COMBAT_DAMAGE_RESULT per RFC spec
+            damage_result_pdu = {
+                "type": "COMBAT_DAMAGE_RESULT",
+                "seq_num": self.server.get_next_sequence_number(),
+                "damage_events": result.get("damage_events", []),
+                "life_totals": copy.deepcopy(self.state.get("life_totals", {})),
+                "creatures_died": result.get("creatures_died", [])
+            }
+            self.server.broadcast(damage_result_pdu)
+
+            # 2. Broadcast updated game states to each client
             self.send_personalized_state_update()
+
+            # 3. Transition to END_OF_COMBAT phase
+            trans_seq = self.server.get_next_sequence_number()
+            transition_pdu = {
+                "type": "PHASE_TRANSITION",
+                "seq_num": trans_seq,
+                "from_phase": current_phase,
+                "to_phase": "END_OF_COMBAT",
+                "active_player": self.state["active_player"],
+                "turn": self.state.get("turn", 1)
+            }
+            self.state["phase"] = "END_OF_COMBAT"
+            self.server.broadcast(transition_pdu)
+
+            # 4. Open Priority Window at End of Combat
             self.grant_priority(self.state["active_player"])
 
     def _validate_priority_action(self, player_id, pdu):

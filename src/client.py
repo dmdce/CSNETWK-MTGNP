@@ -21,6 +21,7 @@ class MTGNPClient:
         """
 
         self.player_id = player_id
+        self.opponent_id = None
         self.host = HOST
         self.port = PORT
         self.sock = None
@@ -29,6 +30,7 @@ class MTGNPClient:
         self.server_seq_num = None
         self.priority_seq_num = None
         self.has_priority = False
+        self.last_phase_transition_seq = 0
         self.last_server_seq = 0         # Sequence number received from server's latest state update
         self.mulligan_count = 0          # Number of mulligans taken in current game
         self.current_hand = []           # Local tracking of drawn hand
@@ -93,7 +95,7 @@ class MTGNPClient:
                 # Force close to trigger reconnection
                 self.sock.shutdown(socket.SHUT_RDWR)
                 self.sock.close()
-            except:
+            except OSError:
                 pass
 
     def _start_input_thread(self):
@@ -218,6 +220,34 @@ class MTGNPClient:
                 print("\n--- IN-GAME COMMANDS ---")
                 print("  pass / p : Pass priority")
                 print("  concede  : Concede the current game\n")
+            elif cmd in ("attack", "att", "a"):
+                # Formats attackers to match RFC DECLARE_ATTACKERS schema
+                attackers = [{"creature_id": cid, "target": self.opponent_id} for cid in tokens[1:]]
+                pdu = {
+                    "type": "DECLARE_ATTACKERS",
+                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
+                    "attackers": attackers
+                }
+                print(f"[ACTION] Declaring attackers: {attackers}")
+                self._send_pdu(pdu)
+
+            elif cmd in ("block", "b"):
+                # Formats blockers to match RFC DECLARE_BLOCKERS schema
+                if len(tokens) < 3:
+                    print("Usage: block <blocker_creature_id> <attacking_creature_id>")
+                    return
+                blocker_id = tokens[1]
+                attacker_id = tokens[2]
+                pdu = {
+                    "type": "DECLARE_BLOCKERS",
+                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
+                    "blockers": [{
+                        "creature_id": blocker_id,
+                        "blocking_id": attacker_id
+                    }]
+                }
+                print(f"[ACTION] Declaring blocker {blocker_id} -> {attacker_id}")
+                self._send_pdu(pdu)
             else:
                 print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}. Type 'help'.")
 
@@ -380,6 +410,11 @@ class MTGNPClient:
             self.current_phase = state.get("phase")
             self.current_hand = state.get("hand", [])
 
+            life_totals = state.get("life_totals", {})
+            for pid in life_totals.keys():
+                if pid != self.player_id:
+                    self.opponent_id = pid
+
             print(f"\n--- STATE UPDATE (Seq: {self.last_server_seq}) ---")
             print(f"Phase: {self.current_phase}")
 
@@ -416,6 +451,7 @@ class MTGNPClient:
 
         elif p_type == "PHASE_TRANSITION":
             self.current_phase = pdu.get("to_phase", self.current_phase)
+            self.last_phase_transition_seq = pdu.get("seq_num", self.last_phase_transition_seq)
             self.has_priority = False
             print(
                 f"\n[PHASE] {pdu.get('from_phase')} -> {self.current_phase} "
@@ -428,6 +464,26 @@ class MTGNPClient:
                 self.has_priority = True
                 print(f"\n[PRIORITY] You have priority (seq {self.priority_seq_num}).")
                 print("Type 'pass' to pass priority, or 'help' for available commands.")
+
+
+        elif p_type == "COMBAT_DAMAGE_RESULT":
+            print(f"\n================ COMBAT DAMAGE RESOLVED ================")
+            damage_events = pdu.get("damage_events", [])
+
+            if damage_events:
+                for event in damage_events:
+                    print(f"{event.get('source')} dealt {event.get('amount')} damage to {event.get('target')}.")
+            else:
+                print("No combat damage was dealt.")
+            life_totals = pdu.get("life_totals", {})
+
+            if life_totals:
+                print(f"life Totals: {life_totals}")
+            creatures_died = pdu.get("creatures_died", [])
+            if creatures_died:
+                print(f"Creatures destroyed: {', '.join(creatures_died)}")
+
+            print(f"========================================================\n")
 
         elif p_type == "ERROR":
             logger.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")

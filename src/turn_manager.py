@@ -406,6 +406,8 @@ class TurnManager:
             if isinstance(entry, dict):
                 attacker_to_blockers.setdefault(entry["attacker_id"], []).append(entry["blocker_id"])
 
+        damage_events = []
+
         for att_entry in declared_attackers:
             att_id = att_entry["creature_id"] if isinstance(att_entry, dict) else att_entry
             attacker = ap_bf.get(att_id)
@@ -419,7 +421,13 @@ class TurnManager:
             # --- UNBLOCKED ATTACKER ---
             if not blocker_ids:
                 if attacker_can_damage:
-                    self.state["life"][nap] = self.state["life"].get(nap, 20) - att_power
+                    self.state["life_totals"][nap] = self.state["life_totals"].get(nap, 20) - att_power
+                    damage_events.append({
+                        "source_id": att_id,
+                        "target_id": nap,
+                        "amount": att_power,
+                        "is_player": True
+                    })
                 continue
 
             # --- BLOCKED ATTACKER ---
@@ -432,6 +440,12 @@ class TurnManager:
                 if self.deals_damage_in_step(blocker, is_first_strike):
                     b_power = max(0, blocker.get("power", 0))
                     attacker["damage"] = attacker.get("damage", 0) + b_power
+                    damage_events.append({
+                        "source_id": blocker["id"],
+                        "target_id": att_id,
+                        "amount": b_power,
+                        "is_player": False
+                    })
 
                 # 2. Attacker deals damage to Blocker
                 if attacker_can_damage and remaining_power > 0:
@@ -443,10 +457,18 @@ class TurnManager:
                     is_last_blocker = (i == len(active_blockers) - 1)
 
                     assigned = remaining_power if is_last_blocker else min(remaining_power, lethal_needed)
-                    blocker["damage"] = b_damage + assigned
-                    remaining_power -= assigned
+                    if assigned > 0:
+                        blocker["damage"] = b_damage + assigned
+                        remaining_power -= assigned
+                        damage_events.append({
+                            "source_id": att_id,
+                            "target_id": blocker["id"],
+                            "amount": assigned,
+                            "is_player": False
+                        })
 
         # --- STATE-BASED ACTIONS (SBAs) ---
+        creatures_died = []
         for owner_id, bf in [(ap, ap_bf_list), (nap, nap_bf_list)]:
             dead_creatures = [
                 c for c in bf
@@ -454,9 +476,15 @@ class TurnManager:
             ]
             for dead in dead_creatures:
                 bf.remove(dead)
+                creatures_died.append(dead["id"])
                 self.state.setdefault("graveyard", {}).setdefault(owner_id, []).append(dead)
 
-        # Note: Phase transitions and priority assignment are managed by engine.py
+        return {
+            "damage_events": damage_events,
+            "life_totals": dict(self.state.get("life_totals", {})),
+            "creatures_died": creatures_died
+        }
+
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
