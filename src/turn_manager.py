@@ -485,6 +485,21 @@ class TurnManager:
             "creatures_died": creatures_died
         }
 
+    def clear_combat_state(self):
+        """
+        Clears attacker/blocker assignments and marked damage from all battlefield permanents.
+        """
+        # Clear combat declaration tracking
+        self.state["attackers"] = []
+        self.state["blockers"] = []
+        self.state["damage_orders"] = {}
+
+        # Clear combat damage marked on permanents across all players
+        battlefield = self.state.get("battlefield", {})
+        for player_id, permanents in battlefield.items():
+            for card in permanents:
+                if isinstance(card, dict) and "damage" in card:
+                    card["damage"] = 0
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]

@@ -450,6 +450,7 @@ class MTGNPClient:
             )
 
         elif p_type == "PHASE_TRANSITION":
+            to_phase = pdu.get("to_phase")
             self.current_phase = pdu.get("to_phase", self.current_phase)
             self.last_phase_transition_seq = pdu.get("seq_num", self.last_phase_transition_seq)
             self.has_priority = False
@@ -457,6 +458,11 @@ class MTGNPClient:
                 f"\n[PHASE] {pdu.get('from_phase')} -> {self.current_phase} "
                 f"| Turn {pdu.get('turn')} | Active: {pdu.get('active_player')}"
             )
+
+            if to_phase == "END_OF_COMBAT":
+                print("\n[PHASE] Entering End of Combat Step. Priority window open.")
+            elif to_phase == "POSTCOMBAT_MAIN":
+                print("\n[PHASE] Combat concluded. Advanced to Postcombat Main Phase.")
 
         elif p_type == "PRIORITY_GRANT":
             if pdu.get("player_id") == self.player_id:

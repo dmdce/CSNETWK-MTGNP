@@ -475,6 +475,31 @@ class GameEngine:
             # 4. Open Priority Window at End of Combat
             self.grant_priority(self.state["active_player"])
 
+    def handle_end_of_combat_phase(self):
+        """
+        Clears combat-related state and advances the turn to POSTCOMBAT_MAIN.
+        Executed after both players pass priority consecutively in END_OF_COMBAT.
+        """
+        # 1. Clear all combat-related state
+        self.turn_manager.clear_combat_state()
+
+        # 2. Advance phase to POSTCOMBAT_MAIN
+        trans_seq = self.server.get_next_sequence_number()
+        transition_pdu = {
+            "type": "PHASE_TRANSITION",
+            "seq_num": trans_seq,
+            "from_phase": "END_OF_COMBAT",
+            "to_phase": "POSTCOMBAT_MAIN",
+            "active_player": self.state["active_player"],
+            "turn": self.state.get("turn", 1)
+        }
+        self.state["phase"] = "POSTCOMBAT_MAIN"
+        self.server.broadcast(transition_pdu)
+
+        # 3. Send state updates and grant priority to Active Player for Postcombat Main
+        self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
+
     def _validate_priority_action(self, player_id, pdu):
         """
         name: _validate_priority_action
@@ -668,6 +693,13 @@ class GameEngine:
         Advances the game phase via the TurnManager, broadcasting PHASE_TRANSITION
         and granting priority when needed.
         """
+        current_phase = self.state.get("phase")
+
+        # 1. Direct handling for steps with custom end-of-step handlers
+        if current_phase == "END_OF_COMBAT":
+            self.handle_end_of_combat_phase()
+            return
+
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
         except GameRuleError as error:
