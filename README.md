@@ -21,8 +21,6 @@ The protocol and implementation follow the [MTGNP RFC v1.0](https://docs.google.
   - `console_logger.py`
   - `logger.py`
 
-No compilation or installation is needed – the program runs directly with Python.
-
 ---
 
 ### Running the Server
