@@ -386,7 +386,7 @@ class TurnManager:
     def resolve_combat_damage_step(self, is_first_strike=False):
         """
         Applies damage for either the First Strike or regular Combat Damage step,
-        evaluates SBAs, and advances phase.
+        evaluates SBAs, and moves dead creatures to the graveyard.
         """
         ap, nap = self.active_player, self.opponent(self.active_player)
 
@@ -436,10 +436,14 @@ class TurnManager:
                 # 2. Attacker deals damage to Blocker
                 if attacker_can_damage and remaining_power > 0:
                     b_toughness = max(0, blocker.get("toughness", 0))
+                    b_damage = blocker.get("damage", 0)
+
+                    # Lethal damage needed = toughness minus damage already marked
+                    lethal_needed = max(0, b_toughness - b_damage)
                     is_last_blocker = (i == len(active_blockers) - 1)
 
-                    assigned = remaining_power if is_last_blocker else min(remaining_power, b_toughness)
-                    blocker["damage"] = blocker.get("damage", 0) + assigned
+                    assigned = remaining_power if is_last_blocker else min(remaining_power, lethal_needed)
+                    blocker["damage"] = b_damage + assigned
                     remaining_power -= assigned
 
         # --- STATE-BASED ACTIONS (SBAs) ---
@@ -452,9 +456,7 @@ class TurnManager:
                 bf.remove(dead)
                 self.state.setdefault("graveyard", {}).setdefault(owner_id, []).append(dead)
 
-        # --- PHASE TRANSITION ---
-        self.state["phase"] = "COMBAT_DAMAGE" if is_first_strike else "POSTCOMBAT_MAIN"
-        self.state["priority_holder"] = self.active_player
+        # Note: Phase transitions and priority assignment are managed by engine.py
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
