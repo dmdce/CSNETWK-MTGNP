@@ -608,7 +608,7 @@ class MTGNPClient:
             self.current_phase = state.get("phase")
             self.current_hand = state.get("hand", [])
 
-            # This ensures priority holder matches server state exactly
+            # Ensure priority holder matches server state exactly
             priority_holder = state.get("priority_holder")
             if priority_holder is not None:
                 self.has_priority = (priority_holder == self.player_id)
@@ -646,7 +646,6 @@ class MTGNPClient:
                 print(f"Graveyard: {state.get('graveyard', {})}")
                 print(f"Stack: {state.get('stack', [])}")
 
-            # logger.debug(f"Received GAME_STATE_UPDATE: {pdu}")
             logger.debug(
                 "Received GAME_STATE_UPDATE:\n%s",
                 json.dumps(pdu, indent=2, sort_keys=True),
@@ -657,11 +656,8 @@ class MTGNPClient:
             self.current_phase = pdu.get("to_phase", self.current_phase)
             self.last_phase_transition_seq = pdu.get("seq_num", self.last_phase_transition_seq)
             self.has_priority = False
-            print(
-                f"\n[PHASE] {pdu.get('from_phase')} -> {self.current_phase} "
-                f"| Turn {pdu.get('turn')} | Active: {pdu.get('active_player')}"
-            )
 
+            # Only print special notices to avoid duplicating GAME_STATE_UPDATE output
             if to_phase == "END_OF_COMBAT":
                 print("\n[PHASE] Entering End of Combat Step. Priority window open.")
             elif to_phase == "POSTCOMBAT_MAIN":
@@ -673,7 +669,6 @@ class MTGNPClient:
                 self.has_priority = True
                 print(f"\n[PRIORITY] You have priority (seq {self.priority_seq_num}).")
                 print("Type 'pass' to pass priority, or 'help' for available commands.")
-
 
         elif p_type == "COMBAT_DAMAGE_RESULT":
             print(f"\n================ COMBAT DAMAGE RESOLVED ================")
@@ -687,7 +682,7 @@ class MTGNPClient:
             life_totals = pdu.get("life_totals", {})
 
             if life_totals:
-                print(f"life Totals: {life_totals}")
+                print(f"Life Totals: {life_totals}")
             creatures_died = pdu.get("creatures_died", [])
             if creatures_died:
                 print(f"Creatures destroyed: {', '.join(creatures_died)}")
