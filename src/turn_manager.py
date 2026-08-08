@@ -73,6 +73,8 @@ class TurnManager:
         self._trigger_ids = count(1)
         self.pending_trigger_decisions = {}
         self.last_draw_failed = False
+        self.state["pending_damage_orders"] = {}
+        self.state["damage_orders"] = {}
 
     @property
     def active_player(self):
@@ -90,10 +92,26 @@ class TurnManager:
         self.state["phase"] = "UNTAP"
         self.state["priority_holder"] = None
         self.state["land_played_this_turn"] = False
-        for permanent in self.state["battlefield"][self.active_player]:
-            if isinstance(permanent, dict):
-                permanent["tapped"] = False
-                permanent["summoning_sick"] = False
+
+        # Reset combat tracking structures
+        self.state["declared_attackers"] = []
+        self.state["declared_blockers"] = []
+        self.state["pending_damage_orders"] = {}
+        self.state["damage_orders"] = {}
+
+        # Untap and clear creature combat flags across all battlefields
+        for pid in self.player_ids:
+            for permanent in self.state["battlefield"].get(pid, []):
+                if isinstance(permanent, dict):
+                    # Untap active player's permanents & remove summoning sickness
+                    if pid == self.active_player:
+                        permanent["tapped"] = False
+                        permanent["summoning_sick"] = False
+
+                    # Clear combat status for all players' permanents
+                    permanent.pop("attacking", None)
+                    permanent.pop("blocking", None)
+
         self.state["phase"] = "UPKEEP"
         return [(from_phase, "UNTAP"), ("UNTAP", "UPKEEP")]
 
@@ -127,7 +145,7 @@ class TurnManager:
             self.last_draw_failed = False
         return old, new
 
-    def begin_combat_step(self):
+    def begin_combat(self):
         """Mutates state for entering BEGIN_COMBAT and collects phase triggers.
 
         Resets pass count, clears floating mana, and queues APNAP combat triggers.
@@ -234,6 +252,7 @@ class TurnManager:
         }
 
         validated_blockers = []
+        assigned_blockers = set()
 
         for entry in blockers:
             if not isinstance(entry, dict) or "blocker_id" not in entry or "attacker_id" not in entry:
@@ -242,8 +261,12 @@ class TurnManager:
             blocker_id = entry["blocker_id"]
             attacker_id = entry["attacker_id"]
 
-            # Blocker must exist on NAP battlefield
-            perm = next((c for c in nap_battlefield if c.get("id") == attacker_id), None)
+            # ENFORCE: One attacker per blocker
+            if blocker_id in assigned_blockers:
+                raise GameRuleError("ILLEGAL_ACTION", f"Creature {blocker_id} is already blocking an attacker.")
+
+            # FIX: Check blocker_id against NAP battlefield
+            perm = next((c for c in nap_battlefield if isinstance(c, dict) and c.get("id") == blocker_id), None)
             if not perm:
                 raise GameRuleError("ILLEGAL_ACTION", f"Creature {blocker_id} is not on your battlefield.")
 
@@ -255,16 +278,61 @@ class TurnManager:
             if attacker_id not in valid_attacker_ids:
                 raise GameRuleError("ILLEGAL_ACTION", f"Creature {attacker_id} is not an active attacker.")
 
+            assigned_blockers.add(blocker_id)
+
             # Note: perm["tapped"] is deliberately NOT set to True (blocking does not tap)
             perm["blocking"] = attacker_id
             validated_blockers.append({"blocker_id": blocker_id, "attacker_id": attacker_id})
 
         self.state["declared_blockers"] = validated_blockers
 
-        # Advance to priority / combat damage step and give priority to active player
-        self.state["phase"] = "COMBAT_DAMAGE"
+        # Group blockers by attacker to check for multiple blockers
+        attacker_blockers = {}
+        for entry in validated_blockers:
+            attacker_blockers.setdefault(entry["attacker_id"], []).append(entry["blocker_id"])
+
+        multiply_blocked = {
+            att_id: b_list for att_id, b_list in attacker_blockers.items() if len(b_list) >= 2
+        }
+
+        # Transition to ASSIGN_DAMAGE_ORDER if 2+ blockers block an attacker, otherwise COMBAT_DAMAGE
+        if multiply_blocked:
+            self.state["phase"] = "ASSIGN_DAMAGE_ORDER"
+            self.state["pending_damage_orders"] = multiply_blocked
+            self.state["damage_orders"] = {}
+        else:
+            self.state["phase"] = "COMBAT_DAMAGE"
+
         self.state["priority_holder"] = self.active_player
         return validated_blockers
+
+    def assign_damage_order(self, player_id, attacker_id, ordered_blocker_ids):
+        """
+        Active player sets the ordering of 2+ blockers for a specific attacker.
+        """
+        if self.state.get("phase") != "ASSIGN_DAMAGE_ORDER":
+            raise GameRuleError("WRONG_PHASE", "Cannot assign damage order outside ASSIGN_DAMAGE_ORDER step.")
+
+        if player_id != self.active_player:
+            raise GameRuleError("NOT_YOUR_PRIORITY", "Only the active player can assign damage ordering.")
+
+        pending = self.state.get("pending_damage_orders", {})
+        if attacker_id not in pending:
+            raise GameRuleError("ILLEGAL_ACTION", f"Attacker {attacker_id} does not require damage ordering.")
+
+        expected_blockers = set(pending[attacker_id])
+        if set(ordered_blocker_ids) != expected_blockers or len(ordered_blocker_ids) != len(expected_blockers) or len(set(ordered_blocker_ids)) != len(ordered_blocker_ids):
+            raise GameRuleError("ILLEGAL_ACTION", "Damage order must include every assigned blocker exactly once.")
+
+        # Record the ordered blockers
+        self.state.setdefault("damage_orders", {})[attacker_id] = ordered_blocker_ids
+        del pending[attacker_id]
+
+        # Advance phase once all multiply-blocked attackers are resolved
+        if not pending:
+            self.state["phase"] = "COMBAT_DAMAGE"
+
+        return ordered_blocker_ids
 
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]

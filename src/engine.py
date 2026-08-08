@@ -169,6 +169,8 @@ class GameEngine:
                     self.handle_declare_attackers_pdu(player_id, pdu)
                 case "DECLARE_BLOCKERS":
                     self.handle_declare_blockers_pdu(player_id, pdu)
+                case "ASSIGN_DAMAGE_ORDER":
+                    self.handle_assign_damage_order_pdu(player_id, pdu)
                 case "CAST_SPELL":
                     self.handle_cast_spell(player_id, pdu)
                 case "PLAY_LAND":
@@ -392,6 +394,36 @@ class GameEngine:
         # Grant priority window before damage resolution
         self.grant_priority(self.state["active_player"])
 
+    def handle_assign_damage_order_pdu(self, player_id, pdu):
+        """
+        Processes ASSIGN_DAMAGE_ORDER PDU sent by the active player for a multiply-blocked attacker.
+        """
+        if self.state["phase"] != "ASSIGN_DAMAGE_ORDER":
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Cannot assign damage order outside ASSIGN_DAMAGE_ORDER phase.", pdu)
+            return
+
+        if player_id != self.state["active_player"]:
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Only active player can assign damage order.", pdu)
+            return
+
+        attacker_id = pdu.get("attacker_id")
+        ordered_blocker_ids = pdu.get("ordered_blocker_ids", [])
+
+        if not attacker_id or not isinstance(ordered_blocker_ids, list):
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "PDU must specify attacker_id and ordered_blocker_ids list.", pdu)
+            return
+
+        try:
+            self.turn_manager.assign_damage_order(player_id, attacker_id, ordered_blocker_ids)
+        except GameRuleError as e:
+            self.server.send_error(player_id, e.code, e.message, pdu)
+            return
+
+        self.send_personalized_state_update()
+
+        # Grant priority once all damage orders have been resolved and phase moves to COMBAT_DAMAGE
+        if self.state["phase"] == "COMBAT_DAMAGE":
+            self.grant_priority(self.state["active_player"])
 
     def _validate_priority_action(self, player_id, pdu):
         """
@@ -597,7 +629,7 @@ class GameEngine:
 
         # Link begin_combat_step when transitioning into BEGIN_COMBAT
         if to_phase == "BEGIN_COMBAT":
-            from_phase, to_phase = self.turn_manager.begin_combat_step()
+            from_phase, to_phase = self.turn_manager.begin_combat()
             self.broadcast_phase_transition(from_phase, to_phase)
             self.send_personalized_state_update()
             self.grant_priority(self.state["active_player"])
