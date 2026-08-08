@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 import struct
 import sys
 import socket
@@ -8,6 +10,11 @@ import threading
 import argparse
 from protocol import MAX_PDU_SIZE
 from console_logger import setup_logging, get_logger
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
@@ -47,6 +54,8 @@ class MTGNPClient:
                     "phantasmal_bear_001", "phantasmal_bear_002", "phantasmal_bear_003", "phantasmal_bear_004",
                     "ponder_001", "ponder_002", "ponder_003", "ponder_004",
                     "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
+        self.card_db = {}
+        self._load_card_database()
 
     def _start_heartbeat(self):
         """
@@ -106,6 +115,96 @@ class MTGNPClient:
         input_thread = threading.Thread(target=self._input_loop, daemon=True)
         input_thread.start()
 
+    def _load_card_database(self):
+        """
+        name: _load_card_database
+        description: Loads card metadata from the local Excel workbook into a lookup dictionary.
+        """
+        if openpyxl is None:
+            logger.warning("Card database support disabled because openpyxl is not installed.")
+            return
+
+        workbook_path = os.path.join(os.path.dirname(__file__), "mtgnp_master_card_list.xlsx")
+        if not os.path.exists(workbook_path):
+            logger.warning(f"Card database file not found: {workbook_path}")
+            return
+
+        try:
+            wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+            ws = wb.active
+
+            for row in ws.iter_rows(min_row=3, values_only=True):
+                if not row or row[0] is None:
+                    continue
+
+                card_data = {
+                    "card_id_base": str(row[0]).strip(),
+                    "card_name": str(row[1]).strip() if row[1] is not None else "",
+                    "card_type": str(row[2]).strip() if row[2] is not None else "",
+                    "subtype": str(row[3]).strip() if row[3] is not None else "",
+                    "color": str(row[4]).strip() if row[4] is not None else "",
+                    "cmc": row[5],
+                    "w": row[6],
+                    "u": row[7],
+                    "b": row[8],
+                    "r": row[9],
+                    "g": row[10],
+                    "generic": row[11],
+                    "power": row[12],
+                    "toughness": row[13],
+                    "simplified_effect": str(row[15]).strip() if row[15] is not None else "",
+                }
+
+                self.card_db[card_data["card_id_base"]] = card_data
+        except Exception as exc:
+            logger.warning(f"Failed to load card database: {exc}")
+
+    def _normalize_card_id(self, card_id):
+        normalized = card_id.lower().strip()
+        if normalized in self.card_db:
+            return normalized
+        stripped = re.sub(r'_[0-9]+$', '', normalized)
+        return stripped if stripped in self.card_db else normalized
+
+    def _get_card_info(self, card_id):
+        normalized_id = self._normalize_card_id(card_id)
+        return self.card_db.get(normalized_id)
+
+    def _format_card_value(self, value):
+        if value is None:
+            return "-"
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    def _print_card_info(self, card_data):
+        print(f"\n--- CARD INFO: {card_data['card_name']} ({card_data['card_id_base']}) ---")
+        print(f"Card ID Base: {card_data['card_id_base']}")
+        print(f"Name: {card_data['card_name']}")
+        print(f"Type: {card_data['card_type']}")
+        if card_data.get("subtype"):
+            print(f"Subtype: {card_data['subtype']}")
+        print(f"Color: {card_data['color']}")
+        print(f"CMC: {self._format_card_value(card_data['cmc'])}")
+        print(
+            "Mana: "
+            f"W={self._format_card_value(card_data['w'])} "
+            f"U={self._format_card_value(card_data['u'])} "
+            f"B={self._format_card_value(card_data['b'])} "
+            f"R={self._format_card_value(card_data['r'])} "
+            f"G={self._format_card_value(card_data['g'])} "
+            f"Generic={self._format_card_value(card_data['generic'])}"
+        )
+        print(f"Power/Toughness: {self._format_card_value(card_data['power'])}/{self._format_card_value(card_data['toughness'])}")
+        print(f"Effect: {card_data['simplified_effect']}")
+
+    def _handle_view_command(self, card_id):
+        card_info = self._get_card_info(card_id)
+        if card_info is None:
+            print(f"Card '{card_id}' not found in the card database.")
+            return
+        self._print_card_info(card_info)
+
     def _input_loop(self):
         """
         name: _input_loop
@@ -118,7 +217,7 @@ class MTGNPClient:
                     break
                 cmd_str = line.strip()
                 if cmd_str:
-                    self.handle_user_command(cmd_str)
+                    self._handle_user_command(cmd_str)
             except Exception as e:
                 logger.error(f"Input thread error: {e}")
                 break
@@ -131,6 +230,13 @@ class MTGNPClient:
         """
         tokens = cmd_str.strip().split()
         cmd = tokens[0].lower() if tokens else ""
+
+        if cmd == "view":
+            if len(tokens) < 2:
+                print("Usage: view <card_id>")
+                return
+            self._handle_view_command(tokens[1])
+            return
 
         # --- MULLIGAN PHASE ---
         if self.current_phase == "MULLIGAN":
