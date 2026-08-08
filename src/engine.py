@@ -189,6 +189,8 @@ class GameEngine:
                     self.handle_declare_attackers_pdu(player_id, pdu)
                 case "DECLARE_BLOCKERS":
                     self.handle_declare_blockers_pdu(player_id, pdu)
+                case "ASSIGN_DAMAGE_ORDER":
+                    self.handle_assign_damage_order_pdu(player_id, pdu)
                 case "CAST_SPELL":
                     self.handle_cast_spell(player_id, pdu)
                 case "PLAY_LAND":
@@ -393,6 +395,9 @@ class GameEngine:
                                    "Cannot declare blockers outside DECLARE_BLOCKERS step.", pdu)
             return
 
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+
         if player_id == self.state["active_player"]:
             self.server.send_error(player_id, "ILLEGAL_ACTION", "Non-active player must declare blockers.", pdu)
             return
@@ -414,9 +419,111 @@ class GameEngine:
         # Broadcast updated state showing "blocking" relations while "tapped" remains False
         self.send_personalized_state_update()
 
-        # Grant priority window before damage resolution
-        self.grant_priority(self.state["active_player"])
+        # Check if phase advanced directly into combat damage
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+        else:
+            self.grant_priority(self.state["active_player"])
 
+    def handle_assign_damage_order_pdu(self, player_id, pdu):
+        """
+        Processes ASSIGN_DAMAGE_ORDER PDU sent by the active player for a multiply-blocked attacker.
+        """
+        if self.state["phase"] != "ASSIGN_DAMAGE_ORDER":
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Cannot assign damage order outside ASSIGN_DAMAGE_ORDER phase.", pdu)
+            return
+
+        if player_id != self.state["active_player"]:
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Only active player can assign damage order.", pdu)
+            return
+
+        attacker_id = pdu.get("attacker_id")
+        ordered_blocker_ids = pdu.get("ordered_blocker_ids", [])
+
+        if not attacker_id or not isinstance(ordered_blocker_ids, list):
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "PDU must specify attacker_id and ordered_blocker_ids list.", pdu)
+            return
+
+        try:
+            self.turn_manager.assign_damage_order(player_id, attacker_id, ordered_blocker_ids)
+        except GameRuleError as e:
+            self.server.send_error(player_id, e.code, e.message, pdu)
+            return
+
+        self.send_personalized_state_update()
+
+        # Grant priority once all damage orders have been resolved and phase moves to COMBAT_DAMAGE
+        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+        else:
+            self.grant_priority(self.state["active_player"])
+
+    def handle_combat_damage_phase(self):
+        """
+        Processes combat damage resolution and priority transitions.
+        Called after declare_blockers, assign_damage_order, or phase advancement.
+        """
+        current_phase = self.state.get("phase")
+
+        if current_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            is_first_strike = (current_phase == "FIRST_STRIKE_DAMAGE")
+
+            # Resolve combat damage via TurnManager
+            result = self.turn_manager.resolve_combat_damage_step(is_first_strike=is_first_strike)
+
+            # 1. Broadcast COMBAT_DAMAGE_RESULT per RFC spec
+            damage_result_pdu = {
+                "type": "COMBAT_DAMAGE_RESULT",
+                "seq_num": self.server.get_next_sequence_number(),
+                "damage_events": result.get("damage_events", []),
+                "life_totals": copy.deepcopy(self.state.get("life_totals", {})),
+                "creatures_died": result.get("creatures_died", [])
+            }
+            self.server.broadcast(damage_result_pdu)
+
+            # 2. Broadcast updated game states to each client
+            self.send_personalized_state_update()
+
+            # 3. Transition to END_OF_COMBAT phase
+            trans_seq = self.server.get_next_sequence_number()
+            transition_pdu = {
+                "type": "PHASE_TRANSITION",
+                "seq_num": trans_seq,
+                "from_phase": current_phase,
+                "to_phase": "END_OF_COMBAT",
+                "active_player": self.state["active_player"],
+                "turn": self.state.get("turn", 1)
+            }
+            self.state["phase"] = "END_OF_COMBAT"
+            self.server.broadcast(transition_pdu)
+
+            # 4. Open Priority Window at End of Combat
+            self.grant_priority(self.state["active_player"])
+
+    def handle_end_of_combat_phase(self):
+        """
+        Clears combat-related state and advances the turn to POSTCOMBAT_MAIN.
+        Executed after both players pass priority consecutively in END_OF_COMBAT.
+        """
+        # 1. Clear all combat-related state
+        self.turn_manager.clear_combat_state()
+
+        # 2. Advance phase to POSTCOMBAT_MAIN
+        trans_seq = self.server.get_next_sequence_number()
+        transition_pdu = {
+            "type": "PHASE_TRANSITION",
+            "seq_num": trans_seq,
+            "from_phase": "END_OF_COMBAT",
+            "to_phase": "POSTCOMBAT_MAIN",
+            "active_player": self.state["active_player"],
+            "turn": self.state.get("turn", 1)
+        }
+        self.state["phase"] = "POSTCOMBAT_MAIN"
+        self.server.broadcast(transition_pdu)
+
+        # 3. Send state updates and grant priority to Active Player for Postcombat Main
+        self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
 
     def _validate_priority_action(self, player_id, pdu):
         """
@@ -646,6 +753,12 @@ class GameEngine:
         description: Advances the game phase via the TurnManager, broadcasting PHASE_TRANSITION
                      and granting priority when needed.
         """
+        current_phase = self.state.get("phase")
+
+        # 1. Direct handling for steps with custom end-of-step handlers
+        if current_phase == "END_OF_COMBAT":
+            self.handle_end_of_combat_phase()
+            return
 
         try:
             from_phase, to_phase = self.turn_manager.advance_priority_step()
@@ -654,12 +767,15 @@ class GameEngine:
                 self.game_over(loser_id=self.state["active_player"], reason="DECK_EMPTY")
             return
 
-        # Link begin_combat_step when transitioning into BEGIN_COMBAT
+        # handle BEGIN_COMBAT & other phase transition
         if to_phase == "BEGIN_COMBAT":
-            from_phase, to_phase = self.turn_manager.begin_combat_step()
-            self.broadcast_phase_transition(from_phase, to_phase)
-            self.send_personalized_state_update()
-            self.grant_priority(self.state["active_player"])
+            from_phase, to_phase = self.turn_manager.begin_combat()
+
+        self.state["phase"] = to_phase
+        self.broadcast_phase_transition(from_phase, to_phase)
+
+        if to_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
             return
 
         self.broadcast_phase_transition(from_phase, to_phase)
@@ -674,6 +790,7 @@ class GameEngine:
             if len(self.state["hand"][self.state["active_player"]]) <= 7:
                 self.end_turn()
             return
+
         self.send_personalized_state_update()
         if to_phase in PRIORITY_STEPS:
             self.grant_priority(self.state["active_player"])
@@ -948,19 +1065,7 @@ class GameEngine:
 
         logger.debug(f"Granting priority to {player_id}: {priority_grant_pdu}")
         self.server.send_to_player(player_id, priority_grant_pdu)
-        
-    # def send_error(self, player_id, code, message, pdu, seq=None):
-    #     error_pdu = {
-    #         "type": "ERROR",
-    #         "seq_num": seq if seq is not None else self.server.get_next_sequence_number(),
-    #         "code": code,
-    #         "message": message,
-    #         "rejected_action": pdu
-    #     }
-    #
-    #     print(f"[engine] Sending ERROR to player {player_id}: {error_pdu}")
-    #     self.server.send_to_player(player_id, error_pdu)
-    
+
     def regrant_priority(self, player_id):
         """
         name: regrant_priority
@@ -1073,7 +1178,6 @@ class GameEngine:
         for from_phase, to_phase in transitions:
             self.state["phase"] = to_phase
             self.broadcast_phase_transition(from_phase, to_phase)
-            self.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": to_phase})
             if to_phase == "UNTAP":
                 self.send_personalized_state_update()
         self.grant_priority(self.state["active_player"])

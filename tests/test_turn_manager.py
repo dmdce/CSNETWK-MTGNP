@@ -7,7 +7,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from turn_manager import GameRuleError, TurnManager
 from engine import GameEngine
 
-
 def game_state():
     return {
         "turn": 0,
@@ -23,7 +22,6 @@ def game_state():
         "stack": [],
         "land_played_this_turn": False,
     }
-
 
 class TurnManagerTests(unittest.TestCase):
     def setUp(self):
