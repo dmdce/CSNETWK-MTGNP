@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 import struct
 import sys
 import socket
@@ -8,6 +10,11 @@ import threading
 import argparse
 from protocol import MAX_PDU_SIZE
 from console_logger import setup_logging, get_logger
+
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
 
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
@@ -21,7 +28,6 @@ class MTGNPClient:
         """
 
         self.player_id = player_id
-        self.opponent_id = None
         self.host = HOST
         self.port = PORT
         self.sock = None
@@ -30,7 +36,6 @@ class MTGNPClient:
         self.server_seq_num = None
         self.priority_seq_num = None
         self.has_priority = False
-        self.last_phase_transition_seq = 0
         self.last_server_seq = 0         # Sequence number received from server's latest state update
         self.mulligan_count = 0          # Number of mulligans taken in current game
         self.current_hand = []           # Local tracking of drawn hand
@@ -47,6 +52,8 @@ class MTGNPClient:
                     "phantasmal_bear_001", "phantasmal_bear_002", "phantasmal_bear_003", "phantasmal_bear_004",
                     "ponder_001", "ponder_002", "ponder_003", "ponder_004",
                     "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
+        self.card_db = {}
+        self._load_card_database()
 
     def _start_heartbeat(self):
         """
@@ -95,7 +102,7 @@ class MTGNPClient:
                 # Force close to trigger reconnection
                 self.sock.shutdown(socket.SHUT_RDWR)
                 self.sock.close()
-            except OSError:
+            except:
                 pass
 
     def _start_input_thread(self):
@@ -105,6 +112,96 @@ class MTGNPClient:
         """
         input_thread = threading.Thread(target=self._input_loop, daemon=True)
         input_thread.start()
+
+    def _load_card_database(self):
+        """
+        name: _load_card_database
+        description: Loads card metadata from the local Excel workbook into a lookup dictionary.
+        """
+        if openpyxl is None:
+            logger.warning("Card database support disabled because openpyxl is not installed.")
+            return
+
+        workbook_path = os.path.join(os.path.dirname(__file__), "mtgnp_master_card_list.xlsx")
+        if not os.path.exists(workbook_path):
+            logger.warning(f"Card database file not found: {workbook_path}")
+            return
+
+        try:
+            wb = openpyxl.load_workbook(workbook_path, read_only=True, data_only=True)
+            ws = wb.active
+
+            for row in ws.iter_rows(min_row=3, values_only=True):
+                if not row or row[0] is None:
+                    continue
+
+                card_data = {
+                    "card_id_base": str(row[0]).strip(),
+                    "card_name": str(row[1]).strip() if row[1] is not None else "",
+                    "card_type": str(row[2]).strip() if row[2] is not None else "",
+                    "subtype": str(row[3]).strip() if row[3] is not None else "",
+                    "color": str(row[4]).strip() if row[4] is not None else "",
+                    "cmc": row[5],
+                    "w": row[6],
+                    "u": row[7],
+                    "b": row[8],
+                    "r": row[9],
+                    "g": row[10],
+                    "generic": row[11],
+                    "power": row[12],
+                    "toughness": row[13],
+                    "simplified_effect": str(row[15]).strip() if row[15] is not None else "",
+                }
+
+                self.card_db[card_data["card_id_base"]] = card_data
+        except Exception as exc:
+            logger.warning(f"Failed to load card database: {exc}")
+
+    def _normalize_card_id(self, card_id):
+        normalized = card_id.lower().strip()
+        if normalized in self.card_db:
+            return normalized
+        stripped = re.sub(r'_[0-9]+$', '', normalized)
+        return stripped if stripped in self.card_db else normalized
+
+    def _get_card_info(self, card_id):
+        normalized_id = self._normalize_card_id(card_id)
+        return self.card_db.get(normalized_id)
+
+    def _format_card_value(self, value):
+        if value is None:
+            return "-"
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    def _print_card_info(self, card_data):
+        print(f"\n--- CARD INFO: {card_data['card_name']} ({card_data['card_id_base']}) ---")
+        print(f"Card ID Base: {card_data['card_id_base']}")
+        print(f"Name: {card_data['card_name']}")
+        print(f"Type: {card_data['card_type']}")
+        if card_data.get("subtype"):
+            print(f"Subtype: {card_data['subtype']}")
+        print(f"Color: {card_data['color']}")
+        print(f"CMC: {self._format_card_value(card_data['cmc'])}")
+        print(
+            "Mana: "
+            f"W={self._format_card_value(card_data['w'])} "
+            f"U={self._format_card_value(card_data['u'])} "
+            f"B={self._format_card_value(card_data['b'])} "
+            f"R={self._format_card_value(card_data['r'])} "
+            f"G={self._format_card_value(card_data['g'])} "
+            f"Generic={self._format_card_value(card_data['generic'])}"
+        )
+        print(f"Power/Toughness: {self._format_card_value(card_data['power'])}/{self._format_card_value(card_data['toughness'])}")
+        print(f"Effect: {card_data['simplified_effect']}")
+
+    def _handle_view_command(self, card_id):
+        card_info = self._get_card_info(card_id)
+        if card_info is None:
+            print(f"Card '{card_id}' not found in the card database.")
+            return
+        self._print_card_info(card_info)
 
     def _input_loop(self):
         """
@@ -131,6 +228,13 @@ class MTGNPClient:
         """
         tokens = cmd_str.strip().split()
         cmd = tokens[0].lower() if tokens else ""
+
+        if cmd == "view":
+            if len(tokens) < 2:
+                print("Usage: view <card_id>")
+                return
+            self._handle_view_command(tokens[1])
+            return
 
         # --- MULLIGAN PHASE ---
         if self.current_phase == "MULLIGAN":
@@ -216,107 +320,17 @@ class MTGNPClient:
                 })
                 self.has_priority = False
                 print("[ACTION] Conceding the game...")
+            elif cmd == "view":
+                if len(tokens) < 2:
+                    print("Usage: view <card_id>")
+                    return
+                self._handle_view_command(tokens[1])
             elif cmd == "help":
                 print("\n--- IN-GAME COMMANDS ---")
                 print("  pass / p : Pass priority")
-                print("  concede  : Concede the current game\n")
-            elif cmd in ("attack", "att", "a"):
-                # Formats attackers to match RFC DECLARE_ATTACKERS schema
-                attackers = [{"creature_id": cid, "target": self.opponent_id} for cid in tokens[1:]]
-                pdu = {
-                    "type": "DECLARE_ATTACKERS",
-                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
-                    "attackers": attackers
-                }
-                print(f"[ACTION] Declaring attackers: {attackers}")
-                self._send_pdu(pdu)
-
-            elif cmd in ("block", "b"):
-                # Formats blockers to match RFC DECLARE_BLOCKERS schema
-                if len(tokens) < 3:
-                    print("Usage: block <blocker_creature_id> <attacking_creature_id>")
-                    return
-                blocker_id = tokens[1]
-                attacker_id = tokens[2]
-                pdu = {
-                    "type": "DECLARE_BLOCKERS",
-                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
-                    "blockers": [{
-                        "creature_id": blocker_id,
-                        "blocking_id": attacker_id
-                    }]
-                }
-                print(f"[ACTION] Declaring blocker {blocker_id} -> {attacker_id}")
-                self._send_pdu(pdu)
-            elif cmd in ("cast", "c"):
-                # Usage: cast <card_id> [mana_payment_json] [target1 target2...]
-                if len(tokens) < 2:
-                    print("Usage: cast <card_id> [target1 target2...]")
-                    return
-                card_id = tokens[1]
-                targets = tokens[2:] if len(tokens) > 2 else []
-                pdu = {
-                    "type": "CAST_SPELL",
-                    "seq_num": self.priority_seq_num,
-                    "card_id": card_id,
-                    "targets": targets,
-                    "mana_payment": {}
-                }
-                print(f"[ACTION] Casting spell: {card_id}")
-                self._send_pdu(pdu)
-
-            elif cmd in ("land", "l"):
-                # Usage: land <card_id>
-                if len(tokens) < 2:
-                    print("Usage: land <card_id>")
-                    return
-                pdu = {
-                    "type": "PLAY_LAND",
-                    "seq_num": self.priority_seq_num,
-                    "card_id": tokens[1]
-                }
-                print(f"[ACTION] Playing land: {tokens[1]}")
-                self._send_pdu(pdu)
-
-            elif cmd in ("activate", "act"):
-                # Usage: activate <source_id> <ability_index> [target1...]
-                if len(tokens) < 3:
-                    print("Usage: activate <source_id> <ability_index> [target1...]")
-                    return
-                pdu = {
-                    "type": "ACTIVATE_ABILITY",
-                    "seq_num": self.priority_seq_num,
-                    "source_id": tokens[1],
-                    "ability_index": int(tokens[2]),
-                    "targets": tokens[3:] if len(tokens) > 3 else {},
-                    "cost_payment": {}
-                }
-                print(f"[ACTION] Activating ability on {tokens[1]}")
-                self._send_pdu(pdu)
-
-            elif cmd == "order_damage":
-                # Usage: order_damage <attacker_id> <blocker1> <blocker2>...
-                if len(tokens) < 3:
-                    print("Usage: order_damage <attacker_id> <blocker1_id> <blocker2_id>...")
-                    return
-                pdu = {
-                    "type": "ASSIGN_DAMAGE_ORDER",
-                    "seq_num": self.last_phase_transition_seq,
-                    "attacker_id": tokens[1],
-                    "ordered_blocker_ids": tokens[2:]
-                }
-                print(f"[ACTION] Assigning damage order for {tokens[1]}: {tokens[2:]}")
-                self._send_pdu(pdu)
-
-            elif cmd == "discard":
-                # Usage: discard <card_id1> <card_id2>...
-                pdu = {
-                    "type": "DISCARD",
-                    "seq_num": self.server_seq_num,
-                    "cards": tokens[1:]
-                }
-                print(f"[ACTION] Discarding cards: {tokens[1:]}")
-                self._send_pdu(pdu)
+                print("  concede  : Concede the current game")
+                print("  view <card_id> : Show metadata for a card\n\n")
+                print()
             else:
                 print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}. Type 'help'.")
 
@@ -479,16 +493,6 @@ class MTGNPClient:
             self.current_phase = state.get("phase")
             self.current_hand = state.get("hand", [])
 
-            # This ensures priority holder matches server state exactly
-            priority_holder = state.get("priority_holder")
-            if priority_holder is not None:
-                self.has_priority = (priority_holder == self.player_id)
-
-            life_totals = state.get("life_totals", {})
-            for pid in life_totals.keys():
-                if pid != self.player_id:
-                    self.opponent_id = pid
-
             print(f"\n--- STATE UPDATE (Seq: {self.last_server_seq}) ---")
             print(f"Phase: {self.current_phase}")
 
@@ -524,19 +528,12 @@ class MTGNPClient:
             )
 
         elif p_type == "PHASE_TRANSITION":
-            to_phase = pdu.get("to_phase")
             self.current_phase = pdu.get("to_phase", self.current_phase)
-            self.last_phase_transition_seq = pdu.get("seq_num", self.last_phase_transition_seq)
             self.has_priority = False
             print(
                 f"\n[PHASE] {pdu.get('from_phase')} -> {self.current_phase} "
                 f"| Turn {pdu.get('turn')} | Active: {pdu.get('active_player')}"
             )
-
-            if to_phase == "END_OF_COMBAT":
-                print("\n[PHASE] Entering End of Combat Step. Priority window open.")
-            elif to_phase == "POSTCOMBAT_MAIN":
-                print("\n[PHASE] Combat concluded. Advanced to Postcombat Main Phase.")
 
         elif p_type == "PRIORITY_GRANT":
             if pdu.get("player_id") == self.player_id:
@@ -544,26 +541,6 @@ class MTGNPClient:
                 self.has_priority = True
                 print(f"\n[PRIORITY] You have priority (seq {self.priority_seq_num}).")
                 print("Type 'pass' to pass priority, or 'help' for available commands.")
-
-
-        elif p_type == "COMBAT_DAMAGE_RESULT":
-            print(f"\n================ COMBAT DAMAGE RESOLVED ================")
-            damage_events = pdu.get("damage_events", [])
-
-            if damage_events:
-                for event in damage_events:
-                    print(f"{event.get('source')} dealt {event.get('amount')} damage to {event.get('target')}.")
-            else:
-                print("No combat damage was dealt.")
-            life_totals = pdu.get("life_totals", {})
-
-            if life_totals:
-                print(f"life Totals: {life_totals}")
-            creatures_died = pdu.get("creatures_died", [])
-            if creatures_died:
-                print(f"Creatures destroyed: {', '.join(creatures_died)}")
-
-            print(f"========================================================\n")
 
         elif p_type == "ERROR":
             logger.error(f"ERROR from server ({pdu.get('code')}): {pdu.get('message')}")
