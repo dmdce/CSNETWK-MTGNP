@@ -248,6 +248,75 @@ class MTGNPClient:
                 }
                 print(f"[ACTION] Declaring blocker {blocker_id} -> {attacker_id}")
                 self._send_pdu(pdu)
+            elif cmd in ("cast", "c"):
+                # Usage: cast <card_id> [mana_payment_json] [target1 target2...]
+                if len(tokens) < 2:
+                    print("Usage: cast <card_id> [target1 target2...]")
+                    return
+                card_id = tokens[1]
+                targets = tokens[2:] if len(tokens) > 2 else []
+                pdu = {
+                    "type": "CAST_SPELL",
+                    "seq_num": self.priority_seq_num,
+                    "card_id": card_id,
+                    "targets": targets,
+                    "mana_payment": {}
+                }
+                print(f"[ACTION] Casting spell: {card_id}")
+                self._send_pdu(pdu)
+
+            elif cmd in ("land", "l"):
+                # Usage: land <card_id>
+                if len(tokens) < 2:
+                    print("Usage: land <card_id>")
+                    return
+                pdu = {
+                    "type": "PLAY_LAND",
+                    "seq_num": self.priority_seq_num,
+                    "card_id": tokens[1]
+                }
+                print(f"[ACTION] Playing land: {tokens[1]}")
+                self._send_pdu(pdu)
+
+            elif cmd in ("activate", "act"):
+                # Usage: activate <source_id> <ability_index> [target1...]
+                if len(tokens) < 3:
+                    print("Usage: activate <source_id> <ability_index> [target1...]")
+                    return
+                pdu = {
+                    "type": "ACTIVATE_ABILITY",
+                    "seq_num": self.priority_seq_num,
+                    "source_id": tokens[1],
+                    "ability_index": int(tokens[2]),
+                    "targets": tokens[3:] if len(tokens) > 3 else {},
+                    "cost_payment": {}
+                }
+                print(f"[ACTION] Activating ability on {tokens[1]}")
+                self._send_pdu(pdu)
+
+            elif cmd == "order_damage":
+                # Usage: order_damage <attacker_id> <blocker1> <blocker2>...
+                if len(tokens) < 3:
+                    print("Usage: order_damage <attacker_id> <blocker1_id> <blocker2_id>...")
+                    return
+                pdu = {
+                    "type": "ASSIGN_DAMAGE_ORDER",
+                    "seq_num": self.last_phase_transition_seq,
+                    "attacker_id": tokens[1],
+                    "ordered_blocker_ids": tokens[2:]
+                }
+                print(f"[ACTION] Assigning damage order for {tokens[1]}: {tokens[2:]}")
+                self._send_pdu(pdu)
+
+            elif cmd == "discard":
+                # Usage: discard <card_id1> <card_id2>...
+                pdu = {
+                    "type": "DISCARD",
+                    "seq_num": self.server_seq_num,
+                    "cards": tokens[1:]
+                }
+                print(f"[ACTION] Discarding cards: {tokens[1:]}")
+                self._send_pdu(pdu)
             else:
                 print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}. Type 'help'.")
 
@@ -409,6 +478,11 @@ class MTGNPClient:
             state = pdu.get("state", {})
             self.current_phase = state.get("phase")
             self.current_hand = state.get("hand", [])
+
+            # This ensures priority holder matches server state exactly
+            priority_holder = state.get("priority_holder")
+            if priority_holder is not None:
+                self.has_priority = (priority_holder == self.player_id)
 
             life_totals = state.get("life_totals", {})
             for pid in life_totals.keys():

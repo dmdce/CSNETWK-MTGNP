@@ -334,7 +334,9 @@ class TurnManager:
         return ordered_blocker_ids
 
     def get_combat_keywords(self, creature):
-        """Internal helper to extract normalized combat keywords for a creature."""
+        """
+        Internal helper to extract normalized combat keywords for a creature.
+        """
         if not isinstance(creature, dict):
             return set()
         keywords = set(creature.get("keywords", []))
@@ -345,7 +347,9 @@ class TurnManager:
         return keywords
 
     def has_first_or_double_strike(self, creature):
-        """Helper to check if a creature has first strike or double strike."""
+        """
+        Helper to check if a creature has first or double strike.
+        """
         kw = self.get_combat_keywords(creature)
         return "first_strike" in kw or "double_strike" in kw
 
@@ -362,7 +366,9 @@ class TurnManager:
         return has_fs if is_first_strike else (not has_fs or has_ds)
 
     def check_and_advance_combat_damage_phase(self):
-        """Determines whether combat proceeds to FIRST_STRIKE_DAMAGE or COMBAT_DAMAGE."""
+        """
+        Determines whether combat proceeds to FIRST_STRIKE_DAMAGE or COMBAT_DAMAGE
+        """
         ap, nap = self.active_player, self.opponent(self.active_player)
 
         ap_bf = {c["id"]: c for c in self.state.get("battlefield", {}).get(ap, []) if isinstance(c, dict)}
