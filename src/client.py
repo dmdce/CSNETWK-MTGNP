@@ -118,7 +118,7 @@ class MTGNPClient:
                     break
                 cmd_str = line.strip()
                 if cmd_str:
-                    self._handle_user_command(cmd_str)
+                    self.handle_user_command(cmd_str)
             except Exception as e:
                 logger.error(f"Input thread error: {e}")
                 break
@@ -197,10 +197,11 @@ class MTGNPClient:
             else:
                 print("In lobby. Waiting for match setup... (type 'ready' to re-send readiness)")
 
+        # --- IN-GAME PHASES ---
         else:
             if cmd in ("pass", "p"):
                 if not self.has_priority or self.priority_seq_num is None:
-                    print("You cannot pass because you do not currently hold priority.")
+                    print("Error: You cannot pass because you do not currently hold priority.")
                     return
                 self._send_pdu({
                     "type": "PRIORITY_PASS",
@@ -208,48 +209,8 @@ class MTGNPClient:
                 })
                 self.has_priority = False
                 print("[ACTION] Priority passed.")
-            elif cmd == "concede":
-                self._send_pdu({
-                    "type": "CONCEDE",
-                    "seq_num": self.server_seq_num,
-                    "player_id": self.player_id,
-                })
-                self.has_priority = False
-                print("[ACTION] Conceding the game...")
-            elif cmd == "help":
-                print("\n--- IN-GAME COMMANDS ---")
-                print("  pass / p : Pass priority")
-                print("  concede  : Concede the current game\n")
-            elif cmd in ("attack", "att", "a"):
-                # Formats attackers to match RFC DECLARE_ATTACKERS schema
-                attackers = [{"creature_id": cid, "target": self.opponent_id} for cid in tokens[1:]]
-                pdu = {
-                    "type": "DECLARE_ATTACKERS",
-                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
-                    "attackers": attackers
-                }
-                print(f"[ACTION] Declaring attackers: {attackers}")
-                self._send_pdu(pdu)
 
-            elif cmd in ("block", "b"):
-                # Formats blockers to match RFC DECLARE_BLOCKERS schema
-                if len(tokens) < 3:
-                    print("Usage: block <blocker_creature_id> <attacking_creature_id>")
-                    return
-                blocker_id = tokens[1]
-                attacker_id = tokens[2]
-                pdu = {
-                    "type": "DECLARE_BLOCKERS",
-                    "seq_num": self.last_phase_transition_seq,  # Must echo PHASE_TRANSITION seq_num
-                    "blockers": [{
-                        "creature_id": blocker_id,
-                        "blocking_id": attacker_id
-                    }]
-                }
-                print(f"[ACTION] Declaring blocker {blocker_id} -> {attacker_id}")
-                self._send_pdu(pdu)
             elif cmd in ("cast", "c"):
-                # Usage: cast <card_id> [mana_payment_json] [target1 target2...]
                 if len(tokens) < 2:
                     print("Usage: cast <card_id> [target1 target2...]")
                     return
@@ -262,61 +223,123 @@ class MTGNPClient:
                     "targets": targets,
                     "mana_payment": {}
                 }
-                print(f"[ACTION] Casting spell: {card_id}")
+                print(f"[ACTION] Casting spell '{card_id}' with targets: {targets}")
                 self._send_pdu(pdu)
 
             elif cmd in ("land", "l"):
-                # Usage: land <card_id>
                 if len(tokens) < 2:
                     print("Usage: land <card_id>")
                     return
+                card_id = tokens[1]
                 pdu = {
                     "type": "PLAY_LAND",
                     "seq_num": self.priority_seq_num,
-                    "card_id": tokens[1]
+                    "card_id": card_id
                 }
-                print(f"[ACTION] Playing land: {tokens[1]}")
+                print(f"[ACTION] Playing land '{card_id}'")
                 self._send_pdu(pdu)
 
             elif cmd in ("activate", "act"):
-                # Usage: activate <source_id> <ability_index> [target1...]
                 if len(tokens) < 3:
                     print("Usage: activate <source_id> <ability_index> [target1...]")
                     return
+                source_id = tokens[1]
+                try:
+                    ability_idx = int(tokens[2])
+                except ValueError:
+                    print("Error: <ability_index> must be an integer (e.g., 0, 1).")
+                    return
+                targets = tokens[3:] if len(tokens) > 3 else []
                 pdu = {
                     "type": "ACTIVATE_ABILITY",
                     "seq_num": self.priority_seq_num,
-                    "source_id": tokens[1],
-                    "ability_index": int(tokens[2]),
-                    "targets": tokens[3:] if len(tokens) > 3 else {},
+                    "source_id": source_id,
+                    "ability_index": ability_idx,
+                    "targets": targets,
                     "cost_payment": {}
                 }
-                print(f"[ACTION] Activating ability on {tokens[1]}")
+                print(f"[ACTION] Activating ability index {ability_idx} on '{source_id}' targeting {targets}")
+                self._send_pdu(pdu)
+
+            elif cmd in ("attack", "att", "a"):
+                if len(tokens) < 2:
+                    print("Usage: attack <creature_id1> [creature_id2...]")
+                    return
+                attackers = [{"creature_id": cid, "target": self.opponent_id} for cid in tokens[1:]]
+                pdu = {
+                    "type": "DECLARE_ATTACKERS",
+                    "seq_num": self.last_phase_transition_seq,
+                    "attackers": attackers
+                }
+                print(f"[ACTION] Declaring attackers: {[a['creature_id'] for a in attackers]}")
+                self._send_pdu(pdu)
+
+            elif cmd in ("block", "b"):
+                if len(tokens) < 3:
+                    print("Usage: block <blocker_creature_id> <attacking_creature_id>")
+                    return
+                blocker_id = tokens[1]
+                attacker_id = tokens[2]
+                pdu = {
+                    "type": "DECLARE_BLOCKERS",
+                    "seq_num": self.last_phase_transition_seq,
+                    "blockers": [{
+                        "creature_id": blocker_id,
+                        "blocking_id": attacker_id
+                    }]
+                }
+                print(f"[ACTION] Declaring blocker '{blocker_id}' -> blocking '{attacker_id}'")
                 self._send_pdu(pdu)
 
             elif cmd == "order_damage":
-                # Usage: order_damage <attacker_id> <blocker1> <blocker2>...
                 if len(tokens) < 3:
                     print("Usage: order_damage <attacker_id> <blocker1_id> <blocker2_id>...")
                     return
+                attacker_id = tokens[1]
+                ordered_blockers = tokens[2:]
                 pdu = {
                     "type": "ASSIGN_DAMAGE_ORDER",
                     "seq_num": self.last_phase_transition_seq,
-                    "attacker_id": tokens[1],
-                    "ordered_blocker_ids": tokens[2:]
+                    "attacker_id": attacker_id,
+                    "ordered_blocker_ids": ordered_blockers
                 }
-                print(f"[ACTION] Assigning damage order for {tokens[1]}: {tokens[2:]}")
+                print(f"[ACTION] Ordering combat damage for '{attacker_id}': {ordered_blockers}")
                 self._send_pdu(pdu)
 
             elif cmd == "discard":
-                # Usage: discard <card_id1> <card_id2>...
+                if len(tokens) < 2:
+                    print("Usage: discard <card_id1> [card_id2...]")
+                    return
+                cards_to_discard = tokens[1:]
                 pdu = {
                     "type": "DISCARD",
                     "seq_num": self.server_seq_num,
-                    "cards": tokens[1:]
+                    "cards": cards_to_discard
                 }
-                print(f"[ACTION] Discarding cards: {tokens[1:]}")
+                print(f"[ACTION] Discarding cards: {cards_to_discard}")
                 self._send_pdu(pdu)
+
+            elif cmd == "concede":
+                self._send_pdu({
+                    "type": "CONCEDE",
+                    "seq_num": self.server_seq_num,
+                    "player_id": self.player_id,
+                })
+                self.has_priority = False
+                print("[ACTION] Conceding the game...")
+
+            elif cmd == "help":
+                print("\n--- IN-GAME COMMANDS ---")
+                print("  pass / p                              : Pass priority")
+                print("  land <card_id> / l <card_id>          : Play a land")
+                print("  cast <card_id> [targets...]           : Cast a spell")
+                print("  activate <src> <idx> [targets...]     : Activate permanent ability")
+                print("  attack <creature_ids...>              : Declare attacking creatures")
+                print("  block <blocker_id> <attacker_id>      : Declare blocking creature")
+                print("  order_damage <attacker> <blockers...> : Assign damage order to blockers")
+                print("  discard <card_ids...>                 : Discard cards during Cleanup")
+                print("  concede                               : Concede the current game\n")
+
             else:
                 print(f"Command '{cmd}' not recognized for current phase: {self.current_phase}. Type 'help'.")
 
