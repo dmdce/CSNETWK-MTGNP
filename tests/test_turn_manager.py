@@ -40,6 +40,20 @@ class TurnManagerTests(unittest.TestCase):
         self.assertEqual(("UPKEEP", "DRAW"), self.manager.advance_priority_step())
         self.assertEqual(before, self.state["hand"]["p1"])
 
+    def test_draw_card_moves_top_card_and_updates_hand_count(self):
+        self.assertTrue(self.manager.draw_card("p1"))
+        self.assertEqual(["draw_001"], self.state["libraries"]["p1"])
+        self.assertEqual("draw_002", self.state["hand"]["p1"][-1])
+        self.assertEqual(3, self.state["hand_counts"]["p1"])
+
+    def test_draw_card_reports_empty_library_without_mutating_hand(self):
+        self.state["libraries"]["p1"] = []
+        hand_before = list(self.state["hand"]["p1"])
+
+        self.assertFalse(self.manager.draw_card("p1"))
+        self.assertEqual(hand_before, self.state["hand"]["p1"])
+        self.assertEqual(2, self.state["hand_counts"]["p1"])
+
     def test_priority_transfers_then_advances_after_two_passes(self):
         self.manager.begin_game()
         self.state["priority_holder"] = "p1"

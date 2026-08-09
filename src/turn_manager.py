@@ -138,7 +138,7 @@ class TurnManager:
         new = NEXT_STEP[old]
         self.state["phase"] = new
         self.state["priority_holder"] = None
-        if new == "DRAW":
+        if new == "DRAW" and self.state["turn"] != 1:
             self.last_draw_failed = not self.draw_card(self.active_player)
         else:
             self.last_draw_failed = False
@@ -510,8 +510,10 @@ class TurnManager:
     def draw_card(self, player_id):
         library = self.state["libraries"][player_id]
         if not library:
-            # TODO: Route to a behavior that triggers the DECK_EMPTY state for the player
-            raise GameRuleError("DECK_EMPTY", "The player has no cards left in their library.")
+            # Let the caller transition the game to DECK_EMPTY after the draw
+            # step has been entered.  Returning a status keeps this rules
+            # helper independent from the engine's game-over/broadcast logic.
+            return False
         self.state["hand"][player_id].append(library.pop())
         self.state["hand_counts"][player_id] = len(self.state["hand"][player_id])
         return True
