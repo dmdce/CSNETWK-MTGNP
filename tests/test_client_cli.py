@@ -32,15 +32,24 @@ class ClientPriorityCliTests(unittest.TestCase):
         self.assertEqual([], self.sent)
 
     def test_phase_transition_updates_cli_phase(self):
+        observed = []
+        self.client.set_event_listener(lambda _event, _pdu: observed.append({
+            "phase_token": self.client.last_phase_transition_seq,
+            "active_player": self.client.current_state.get("active_player"),
+            "turn": self.client.current_state.get("turn"),
+        }))
         self.client.handle_pdu({
             "type": "PHASE_TRANSITION",
             "seq_num": 43,
             "from_phase": "UPKEEP",
             "to_phase": "DRAW",
-            "active_player": "p1",
-            "turn": 1,
+            "active_player": "p2",
+            "turn": 2,
         })
         self.assertEqual("DRAW", self.client.current_phase)
+        self.assertEqual([{
+            "phase_token": 43, "active_player": "p2", "turn": 2
+        }], observed)
 
 
 class FakeServer:
@@ -102,6 +111,13 @@ class PhaseProgressionTests(unittest.TestCase):
             and pdu.get("to_phase") == "DRAW"
             for pdu in server.broadcasts
         ))
+        transitions = [
+            pdu for pdu in server.broadcasts
+            if pdu.get("type") == "PHASE_TRANSITION"
+            and pdu.get("from_phase") == "UPKEEP"
+            and pdu.get("to_phase") == "DRAW"
+        ]
+        self.assertEqual(1, len(transitions))
         self.assertEqual([], server.errors)
 
     def test_begin_combat_passes_transition_to_declare_attackers(self):

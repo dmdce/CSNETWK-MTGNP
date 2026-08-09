@@ -600,6 +600,29 @@ class MTGNPClient:
         """
 
         p_type = pdu.get("type")
+
+        # Synchronize action tokens before notifying a graphical listener.
+        # Otherwise the UI can react to a phase/priority PDU on its thread
+        # while these fields still contain the previous step's token.
+        if p_type == "PHASE_TRANSITION":
+            self.last_phase_transition_seq = pdu.get("seq_num", self.last_phase_transition_seq)
+            self.current_phase = pdu.get("to_phase", self.current_phase)
+            self.has_priority = False
+            self.current_state.update({
+                "phase": self.current_phase,
+                "active_player": pdu.get("active_player", self.current_state.get("active_player")),
+                "turn": pdu.get("turn", self.current_state.get("turn")),
+            })
+        elif p_type == "PRIORITY_GRANT" and pdu.get("player_id") == self.player_id:
+            self.priority_seq_num = pdu.get("seq_num")
+            self.has_priority = True
+        elif p_type == "GAME_STATE_UPDATE":
+            state = pdu.get("state", {})
+            self.current_state = state
+            self.current_phase = state.get("phase", self.current_phase)
+            self.current_hand = state.get("hand", [])
+            self.has_priority = state.get("priority_holder") == self.player_id
+
         self._emit("pdu", pdu)
 
         # Capture seq_num from server PDU (GAME_STATE_UPDATE, PRIORITY_GRANT, ...)
@@ -628,8 +651,7 @@ class MTGNPClient:
 
             # Ensure priority holder matches server state exactly
             priority_holder = state.get("priority_holder")
-            if priority_holder is not None:
-                self.has_priority = (priority_holder == self.player_id)
+            self.has_priority = (priority_holder == self.player_id)
 
             life_totals = state.get("life_totals", {})
             for pid in life_totals.keys():

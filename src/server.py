@@ -105,6 +105,53 @@ class MTGNPServer:
         self.game_active = True
         self.lock = threading.Lock()
         self.engine = GameEngine(self)
+        self.event_listener = None
+
+    def set_event_listener(self, listener):
+        """Register a host-console callback for structured operational events."""
+        self.event_listener = listener
+
+    def emit_event(self, category, title, detail="", level="INFO"):
+        if self.event_listener:
+            try:
+                self.event_listener({
+                    "category": category,
+                    "title": title,
+                    "detail": detail,
+                    "level": level,
+                })
+            except Exception:
+                logger.exception("Server event listener failed")
+
+    @staticmethod
+    def _action_summary(player_id, pdu):
+        pdu_type = pdu.get("type", "UNKNOWN")
+        if pdu_type == "MULLIGAN_CHOICE":
+            choice = "kept their hand" if pdu.get("keep") else "took a mulligan"
+            detail = f"{len(pdu.get('cards_to_bottom', []))} card(s) to bottom"
+        elif pdu_type == "DECLARE_ATTACKERS":
+            choice, detail = "declared attackers", f"{len(pdu.get('attackers', []))} attacker(s)"
+        elif pdu_type == "DECLARE_BLOCKERS":
+            choice, detail = "declared blockers", f"{len(pdu.get('blockers', []))} blocker(s)"
+        elif pdu_type == "CAST_SPELL":
+            choice = f"cast {pdu.get('card_id', 'a spell')}"
+            detail = f"targets: {', '.join(map(str, pdu.get('targets', []))) or 'none'}"
+        elif pdu_type == "PLAY_LAND":
+            choice, detail = f"played {pdu.get('card_id', 'a land')}", ""
+        elif pdu_type == "ACTIVATE_ABILITY":
+            choice = f"activated {pdu.get('source_id', 'an ability')}"
+            ability_index = pdu.get("ability_index")
+            detail = f"ability #{ability_index + 1}" if isinstance(ability_index, int) else "invalid ability index"
+        elif pdu_type == "PRIORITY_PASS":
+            choice, detail = "passed priority", f"token {pdu.get('seq_num')}"
+        elif pdu_type == "DISCARD":
+            cards = pdu.get("card_ids", pdu.get("cards", []))
+            choice, detail = "discarded cards", f"{len(cards)} card(s)"
+        elif pdu_type == "CONCEDE":
+            choice, detail = "conceded the match", ""
+        else:
+            choice, detail = pdu_type.replace("_", " ").lower(), ""
+        return f"{player_id or 'Unknown player'} {choice}", detail
 
     def handle_disconnect(self, player_id):
         """
@@ -228,6 +275,7 @@ class MTGNPServer:
         pid = None
 
         logger.debug(f"Connected to {addr}")
+        self.emit_event("NETWORK", "Client connected", f"{addr[0]}:{addr[1]}")
 
         while True:
             try:
@@ -259,6 +307,10 @@ class MTGNPServer:
                     }
                     send_pdu(conn, pong_pdu)
                     continue
+
+                actor = pid or pdu.get("player_id") or self.get_player_id_by_socket(conn)
+                title, detail = self._action_summary(actor, pdu)
+                self.emit_event("ACTION", title, detail)
 
                 with self.lock:
                     if self.phase == "LOBBY":
@@ -345,6 +397,7 @@ class MTGNPServer:
                 self.handle_disconnect(pid)
 
         logger.debug(f"Closing connection for {addr}...")
+        self.emit_event("NETWORK", "Client disconnected", f"{pid or addr[0]}", "WARNING")
         conn.close()
 
     def get_player_id_by_socket(self, sock):
@@ -371,6 +424,9 @@ class MTGNPServer:
         if player_id in self.players:
             send_pdu(self.players[player_id]['sock'], pdu)
             self.players[player_id]['last_seq_sent'] = pdu.get('seq_num')
+            if pdu.get("type") == "PRIORITY_GRANT":
+                self.emit_event("PRIORITY", f"Priority granted to {player_id}",
+                                f"token {pdu.get('seq_num')}")
 
     def broadcast(self, pdu):
         """
@@ -386,6 +442,15 @@ class MTGNPServer:
                     info['last_seq_sent'] = pdu.get('seq_num')
                 except Exception:
                     pass
+        if pdu.get("type") == "PHASE_TRANSITION":
+            self.emit_event("PHASE", f"{pdu.get('from_phase')} → {pdu.get('to_phase')}",
+                            f"Turn {pdu.get('turn')} • active: {pdu.get('active_player')}")
+        elif pdu.get("type") == "COMBAT_DAMAGE_RESULT":
+            self.emit_event("ACTION", "Combat damage resolved",
+                            f"{len(pdu.get('damage_events', []))} damage event(s)")
+        elif pdu.get("type") == "GAME_OVER":
+            self.emit_event("GAME", f"Game over — {pdu.get('winner_id')} wins",
+                            pdu.get("reason", ""), "WARNING")
 
     def get_next_sequence_number(self):
         """
@@ -436,6 +501,7 @@ class MTGNPServer:
             error_pdu["rejected_action"] = rejected_action
 
         logger.error(f"Sending ERROR to {player_id}: {error_pdu}")
+        self.emit_event("ERROR", f"{code} — {player_id}", message, "ERROR")
 
         try:
             send_pdu(self.players[player_id]['sock'], error_pdu)
@@ -454,6 +520,7 @@ class MTGNPServer:
         server.listen(5)  # Backlog
 
         logger.debug(f"Listening on {self.host}:{self.port}...")
+        self.emit_event("NETWORK", "Server listening", f"{self.host}:{self.port}")
 
         while True:
             conn, addr = server.accept()

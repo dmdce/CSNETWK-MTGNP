@@ -288,7 +288,12 @@ class GameClientUI:
                 self.selected_hand.clear()
             if hasattr(self, "board"): self._render()
         elif ptype == "PHASE_TRANSITION" and hasattr(self, "phase_label"):
-            self.phase_label.configure(text=PHASE_LABELS.get(pdu.get("to_phase"), pdu.get("to_phase")))
+            self.state.update({
+                "phase": pdu.get("to_phase", self.state.get("phase")),
+                "active_player": pdu.get("active_player", self.state.get("active_player")),
+                "turn": pdu.get("turn", self.state.get("turn")),
+            })
+            self._render()
         elif ptype == "PRIORITY_GRANT" and hasattr(self, "priority_text"):
             if pdu.get("player_id") == self.client.player_id:
                 self.priority_text.configure(text="Your priority — choose an action", fg=GREEN)

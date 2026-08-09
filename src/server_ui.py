@@ -19,7 +19,12 @@ class QueueLogHandler(logging.Handler):
         self.output = output
 
     def emit(self, record):
-        self.output.put((record.levelname, self.format(record)))
+        self.output.put({
+            "category": "ERROR" if record.levelno >= logging.ERROR else "SYSTEM",
+            "title": record.levelname.title(),
+            "detail": self.format(record),
+            "level": record.levelname,
+        })
 
 
 class ServerConsoleUI:
@@ -32,6 +37,7 @@ class ServerConsoleUI:
         self.server = None
         self.running = False
         self.logs = queue.Queue()
+        self.event_history = []
         self._style()
         self._build()
         self._attach_logging()
@@ -130,10 +136,18 @@ class ServerConsoleUI:
         panel = self._panel(parent, "LIVE EVENT STREAM")
         tools = tk.Frame(panel, bg=SURFACE)
         tools.pack(fill="x", pady=(0, 8))
-        tk.Label(tools, text="Authoritative protocol and engine events", bg=SURFACE, fg=MUTED,
+        tk.Label(tools, text="Authoritative match timeline", bg=SURFACE, fg=MUTED,
                  font=TYPE_BODY_SMALL).pack(side="left")
+        self.event_filter = tk.StringVar(value="ALL EVENTS")
+        filter_box = ttk.Combobox(
+            tools, textvariable=self.event_filter, state="readonly", width=15,
+            values=("ALL EVENTS", "ACTIONS", "PHASES", "PRIORITY", "NETWORK", "ERRORS"),
+            font=TYPE_BODY_SMALL,
+        )
+        filter_box.pack(side="right", padx=(8, 0))
+        filter_box.bind("<<ComboboxSelected>>", lambda _event: self._redraw_events())
         tk.Button(tools, text="CLEAR", bg=SURFACE_3, fg=TEXT, relief="flat", cursor="hand2",
-                  command=lambda: self.log_text.delete("1.0", "end")).pack(side="right")
+                  font=TYPE_LABEL, padx=10, pady=4, command=self._clear_events).pack(side="right")
         self.log_text = tk.Text(panel, bg="#090f18", fg="#b9c7d8", insertbackground=TEXT,
                                 relief="flat", font=(FONT_MONO, 9), padx=14, pady=12,
                                 state="disabled", wrap="word")
@@ -141,9 +155,15 @@ class ServerConsoleUI:
         self.log_text.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.log_text.pack(fill="both", expand=True)
-        self.log_text.tag_configure("ERROR", foreground=RED)
-        self.log_text.tag_configure("WARNING", foreground=GOLD_BRIGHT)
-        self.log_text.tag_configure("INFO", foreground=GREEN)
+        self.log_text.tag_configure("TIME", foreground="#63758a")
+        self.log_text.tag_configure("ACTION", foreground=GREEN, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("PHASE", foreground=GOLD_BRIGHT, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("PRIORITY", foreground=BLUE, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("NETWORK", foreground="#9d8cff", font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("GAME", foreground=GOLD_BRIGHT, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("ERROR", foreground=RED, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("SYSTEM", foreground=MUTED, font=(FONT_UI, 9, "bold"))
+        self.log_text.tag_configure("DETAIL", foreground="#aab7c7", spacing3=8)
         return panel
 
     def _attach_logging(self):
@@ -157,6 +177,7 @@ class ServerConsoleUI:
         except ValueError:
             messagebox.showerror("Invalid port", "The listener port must be numeric."); return
         self.server = MTGNPServer()
+        self.server.set_event_listener(self.logs.put)
         self.server.host, self.server.port = self.host_var.get().strip(), port
         self.running = True
         self.start_btn.state(["disabled"])
@@ -168,7 +189,8 @@ class ServerConsoleUI:
         try:
             self.server.start()
         except Exception as exc:
-            self.logs.put(("ERROR", f"Server stopped: {exc}"))
+            self.logs.put({"category": "ERROR", "title": "Server stopped",
+                           "detail": str(exc), "level": "ERROR"})
             self.root.after(0, self._mark_offline)
 
     def _mark_offline(self):
@@ -180,15 +202,52 @@ class ServerConsoleUI:
     def _reset(self):
         if self.server and messagebox.askyesno("Reset lobby", "End the current session and clear both player slots?"):
             self.server.reset_lobby_state()
-            self.logs.put(("WARNING", "Lobby reset by host operator."))
+            self.logs.put({"category": "SYSTEM", "title": "Lobby reset",
+                           "detail": "Reset by host operator.", "level": "WARNING"})
+
+    def _event_is_visible(self, event):
+        selected = self.event_filter.get()
+        category = event.get("category", "SYSTEM")
+        mapping = {
+            "ACTIONS": {"ACTION", "GAME"}, "PHASES": {"PHASE"},
+            "PRIORITY": {"PRIORITY"}, "NETWORK": {"NETWORK"},
+            "ERRORS": {"ERROR"},
+        }
+        return selected == "ALL EVENTS" or category in mapping.get(selected, set())
+
+    def _append_event(self, event):
+        if not self._event_is_visible(event):
+            return
+        category = event.get("category", "SYSTEM")
+        stamp = event.get("timestamp") or datetime.now().strftime("%H:%M:%S")
+        title, detail = event.get("title", "Event"), event.get("detail", "")
+        self.log_text.insert("end", f"{stamp}  ", "TIME")
+        self.log_text.insert("end", f"{category:<8}  {title}\n", category)
+        if detail:
+            self.log_text.insert("end", f"          {detail}\n", "DETAIL")
+
+    def _redraw_events(self):
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        for event in self.event_history:
+            self._append_event(event)
+        self.log_text.configure(state="disabled")
+        self.log_text.see("end")
+
+    def _clear_events(self):
+        self.event_history.clear()
+        self._redraw_events()
 
     def _refresh(self):
         while True:
             try:
-                level, line = self.logs.get_nowait()
+                event = self.logs.get_nowait()
+                event.setdefault("timestamp", datetime.now().strftime("%H:%M:%S"))
+                self.event_history.append(event)
+                if len(self.event_history) > 1000:
+                    self.event_history.pop(0)
                 self.log_text.configure(state="normal")
-                stamp = datetime.now().strftime("%H:%M:%S")
-                self.log_text.insert("end", f"{stamp}  {line}\n", level)
+                self._append_event(event)
                 self.log_text.configure(state="disabled")
                 self.log_text.see("end")
             except queue.Empty:

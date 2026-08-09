@@ -819,7 +819,6 @@ class GameEngine:
             self.handle_combat_damage_phase()
             return
 
-        self.broadcast_phase_transition(from_phase, to_phase)
         self.queue_trigger_event("STEP_PHASE_BEGIN", {"phase": to_phase})
         if to_phase == "DRAW" and self.state["turn"] != 1:
             if self.turn_manager.last_draw_failed:
