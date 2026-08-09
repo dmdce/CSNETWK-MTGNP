@@ -13,6 +13,11 @@ CARD_EFFECTS = {
     "shock": {"kind": "DAMAGE", "amount": 2},
     "counterspell": {"kind": "COUNTER"},
     "goblin_guide": {"kind": "CREATURE", "power": 2, "toughness": 2, "haste": True},
+    # TODO: Implement these ff. card effects
+    # "monastery_swiftspear": {},
+    # "phantasmal_bear": {},
+    # "prodigal_sorcerer": {},
+    # "ponder": {}
 }
 
 LAND_PREFIXES = ("mountain", "island", "swamp", "forest", "plains")
