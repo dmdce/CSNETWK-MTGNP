@@ -9,6 +9,8 @@ from engine import GameEngine
 from logger import log_pdu, clear_log
 from console_logger import setup_logging, get_logger
 
+logger = get_logger(__name__)
+
 HOST = socket.gethostbyname(socket.gethostname())
 PORT = 4444
 

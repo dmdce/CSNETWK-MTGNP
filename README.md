@@ -23,6 +23,18 @@ The protocol and implementation follow the [MTGNP RFC v1.0](https://docs.google.
 
 ### Running the Server
 
+#### Graphical host console (recommended)
+
+```bash
+pip install -r requirements.txt
+python src/server_ui.py --verbose
+```
+
+The host console provides listener configuration, player connection health,
+live match telemetry, lobby reset controls, and an event stream.
+
+#### Command-line server
+
 ```bash
 py server.py [--verbose]
 ```
@@ -39,6 +51,20 @@ py server.py [--verbose]
 ---
 
 ### Running the Client
+
+#### Graphical game client (recommended)
+
+```bash
+pip install -r requirements.txt
+python src/client_ui.py --verbose
+```
+
+The graphical client uses the master card workbook for card names, mana costs,
+types, stats, colors, and effect text. Select cards directly on the table,
+inspect them in the right panel, and use the contextual action controls.
+
+#### Command-line client
+
 ```bash
 py client.py [--verbose] [--name NAME]
 ```
