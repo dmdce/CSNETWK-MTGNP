@@ -591,9 +591,11 @@ class GameEngine:
             if (self.state.get("phase") == "DECLARE_ATTACKERS"
                     and self.state.get("attackers_declared")):
                 self._transition_to_declare_blockers()
-            elif (self.state.get("phase") == "DECLARE_BLOCKERS"
-                  and self.state.get("blockers_declared")):
-                self._advance_after_blockers()
+            elif self.state.get("phase") == "DECLARE_BLOCKERS":
+                if self.state.get("blockers_declared") or not self.state.get("declared_blockers"):
+                    self._advance_after_blockers()
+                else:
+                    self.advance_phase()
             else:
                 self.advance_phase()
 
