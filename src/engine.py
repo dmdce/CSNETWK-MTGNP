@@ -322,6 +322,7 @@ class GameEngine:
 
         self.broadcast_phase_transition(from_phase, to_phase)
         self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
 
     def handle_declare_attackers_pdu(self, player_id, pdu):
         """
@@ -765,6 +766,8 @@ class GameEngine:
         except GameRuleError as error:
             if error.code == "DECK_EMPTY":
                 self.game_over(loser_id=self.state["active_player"], reason="DECK_EMPTY")
+            elif self.state.get("phase") == "BEGIN_COMBAT":
+                self.transition_to_declare_attackers()
             return
 
         # handle BEGIN_COMBAT & other phase transition

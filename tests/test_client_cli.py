@@ -104,6 +104,39 @@ class PhaseProgressionTests(unittest.TestCase):
         ))
         self.assertEqual([], server.errors)
 
+    def test_begin_combat_passes_transition_to_declare_attackers(self):
+        server = FakeServer()
+        engine = GameEngine(server)
+        engine.player_ids = ["p1", "p2"]
+        engine.state = {
+            "turn": 2,
+            "phase": "BEGIN_COMBAT",
+            "active_player": "p1",
+            "priority_holder": None,
+            "life_totals": {"p1": 20, "p2": 20},
+            "hand": {"p1": [], "p2": []},
+            "hand_counts": {"p1": 0, "p2": 0},
+            "libraries": {"p1": [], "p2": []},
+            "battlefield": {"p1": [], "p2": []},
+            "graveyard": {"p1": [], "p2": []},
+            "stack": [],
+            "land_played_this_turn": False,
+        }
+        engine.turn_manager = TurnManager(engine.state, engine.player_ids)
+
+        engine.grant_priority("p1")
+        engine.handle_priority_pass("p1", {"type": "PRIORITY_PASS", "seq_num": 1})
+        engine.handle_priority_pass("p2", {"type": "PRIORITY_PASS", "seq_num": 2})
+
+        self.assertEqual("DECLARE_ATTACKERS", engine.state["phase"])
+        self.assertTrue(any(
+            pdu.get("type") == "PHASE_TRANSITION"
+            and pdu.get("from_phase") == "BEGIN_COMBAT"
+            and pdu.get("to_phase") == "DECLARE_ATTACKERS"
+            for pdu in server.broadcasts
+        ))
+        self.assertEqual([], server.errors)
+
 
 if __name__ == "__main__":
     unittest.main()
