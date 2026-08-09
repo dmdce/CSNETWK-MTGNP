@@ -576,7 +576,46 @@ class GameEngine:
         elif outcome == "DECLARE_ATTACKERS":
             self.transition_to_declare_attackers()
         else:
-            self.advance_phase()
+            # Combat declarations are turn-based actions rather than entries
+            # in TurnManager.NEXT_STEP.  The UI still permits both players to
+            # pass at these prompts, so a completed pass pair means the
+            # relevant player chose an empty declaration.
+            if self.state.get("phase") == "DECLARE_ATTACKERS":
+                self._complete_empty_attack_declaration()
+            elif self.state.get("phase") == "DECLARE_BLOCKERS":
+                self._complete_empty_block_declaration()
+            else:
+                self.advance_phase()
+
+    def _complete_empty_attack_declaration(self):
+        """Treat two priority passes at DECLARE_ATTACKERS as no attacks."""
+        from_phase = self.state["phase"]
+        try:
+            self.turn_manager.declare_attackers(self.state["active_player"], [])
+        except GameRuleError as error:
+            self.server.send_error(self.state["active_player"], error.code, error.message)
+            return
+        to_phase = self.state["phase"]
+        self.broadcast_phase_transition(from_phase, to_phase)
+        self.send_personalized_state_update()
+        self.grant_priority(self.state["active_player"])
+
+    def _complete_empty_block_declaration(self):
+        """Treat two priority passes at DECLARE_BLOCKERS as no blocks."""
+        from_phase = self.state["phase"]
+        defender = self.turn_manager.opponent(self.state["active_player"])
+        try:
+            self.turn_manager.declare_blockers(defender, [])
+        except GameRuleError as error:
+            self.server.send_error(defender, error.code, error.message)
+            return
+        to_phase = self.state["phase"]
+        self.broadcast_phase_transition(from_phase, to_phase)
+        if to_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
+            self.handle_combat_damage_phase()
+        else:
+            self.send_personalized_state_update()
+            self.grant_priority(self.state["active_player"])
 
     def handle_concede(self, player_id, pdu):
         """

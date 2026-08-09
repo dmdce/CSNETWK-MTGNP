@@ -137,6 +137,72 @@ class PhaseProgressionTests(unittest.TestCase):
         ))
         self.assertEqual([], server.errors)
 
+    def test_two_passes_in_declare_attackers_mean_no_attacks(self):
+        server = FakeServer()
+        engine = GameEngine(server)
+        engine.player_ids = ["p1", "p2"]
+        engine.state = {
+            "turn": 2,
+            "phase": "DECLARE_ATTACKERS",
+            "active_player": "p1",
+            "priority_holder": None,
+            "life_totals": {"p1": 20, "p2": 20},
+            "hand": {"p1": [], "p2": []},
+            "hand_counts": {"p1": 0, "p2": 0},
+            "libraries": {"p1": [], "p2": []},
+            "battlefield": {"p1": [], "p2": []},
+            "graveyard": {"p1": [], "p2": []},
+            "stack": [],
+            "land_played_this_turn": False,
+        }
+        engine.turn_manager = TurnManager(engine.state, engine.player_ids)
+
+        engine.grant_priority("p1")
+        engine.handle_priority_pass("p1", {"type": "PRIORITY_PASS", "seq_num": 1})
+        engine.handle_priority_pass("p2", {"type": "PRIORITY_PASS", "seq_num": 2})
+
+        self.assertEqual("END_OF_COMBAT", engine.state["phase"])
+        self.assertTrue(any(
+            pdu.get("type") == "PHASE_TRANSITION"
+            and pdu.get("from_phase") == "DECLARE_ATTACKERS"
+            and pdu.get("to_phase") == "END_OF_COMBAT"
+            for pdu in server.broadcasts
+        ))
+        self.assertEqual([], server.errors)
+
+    def test_two_passes_in_declare_blockers_mean_no_blocks(self):
+        server = FakeServer()
+        engine = GameEngine(server)
+        engine.player_ids = ["p1", "p2"]
+        engine.state = {
+            "turn": 2,
+            "phase": "DECLARE_BLOCKERS",
+            "active_player": "p1",
+            "priority_holder": None,
+            "life_totals": {"p1": 20, "p2": 20},
+            "hand": {"p1": [], "p2": []},
+            "hand_counts": {"p1": 0, "p2": 0},
+            "libraries": {"p1": [], "p2": []},
+            "battlefield": {
+                "p1": [{"id": "bear_001", "power": 2, "toughness": 2,
+                        "tapped": True, "attacking": True}],
+                "p2": [],
+            },
+            "graveyard": {"p1": [], "p2": []},
+            "stack": [],
+            "declared_attackers": [{"creature_id": "bear_001", "target": "p2"}],
+            "land_played_this_turn": False,
+        }
+        engine.turn_manager = TurnManager(engine.state, engine.player_ids)
+
+        engine.grant_priority("p1")
+        engine.handle_priority_pass("p1", {"type": "PRIORITY_PASS", "seq_num": 1})
+        engine.handle_priority_pass("p2", {"type": "PRIORITY_PASS", "seq_num": 2})
+
+        self.assertEqual("END_OF_COMBAT", engine.state["phase"])
+        self.assertEqual(18, engine.state["life_totals"]["p2"])
+        self.assertEqual([], server.errors)
+
 
 if __name__ == "__main__":
     unittest.main()
