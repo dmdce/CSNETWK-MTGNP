@@ -69,6 +69,8 @@ class GameClientUI:
         self.events = queue.Queue()
         self.selected_hand = set()
         self.selected_field = set()
+        self.mulligan_pending = None
+        self.mulligan_kept = False
         self.bg_photo = None
         self._configure_styles()
         self._build_connect_screen()
@@ -180,6 +182,11 @@ class GameClientUI:
                                          font=(FONT_UI, 9, "bold"))
         self.connection_label.pack(side="right", padx=22)
 
+        self.action_banner = tk.Label(self.app, text="WAITING FOR MATCH", bg=SURFACE_2,
+                                      fg=MUTED, font=(FONT_DISPLAY, 14, "bold"),
+                                      anchor="center", pady=10)
+        self.action_banner.pack(fill="x")
+
         content = tk.Frame(self.app, bg="#0b111c")
         content.pack(fill="both", expand=True, padx=18, pady=(0, 14))
         self.sidebar = tk.Frame(content, bg=SURFACE, width=240, padx=15, pady=14)
@@ -235,10 +242,12 @@ class GameClientUI:
                                       fg=MUTED, font=TYPE_BODY_SMALL)
         self.priority_text.pack(anchor="w", pady=(4, 14))
         self.mulligan_frame = tk.Frame(self.sidebar, bg=SURFACE)
-        ttk.Button(self.mulligan_frame, text="KEEP HAND", style="Gold.TButton",
-                   command=self._keep_hand).pack(fill="x", pady=(0, 5))
-        ttk.Button(self.mulligan_frame, text="TAKE MULLIGAN", style="Game.TButton",
-                   command=lambda: self._command("mulligan")).pack(fill="x")
+        self.keep_btn = ttk.Button(self.mulligan_frame, text="KEEP HAND", style="Gold.TButton",
+                                   command=self._keep_hand)
+        self.keep_btn.pack(fill="x", pady=(0, 5))
+        self.mulligan_btn = ttk.Button(self.mulligan_frame, text="TAKE MULLIGAN", style="Game.TButton",
+                                       command=self._take_mulligan)
+        self.mulligan_btn.pack(fill="x")
         self.pass_btn = ttk.Button(self.sidebar, text="PASS PRIORITY", style="Gold.TButton",
                                    command=lambda: self._command("pass"))
         self.pass_btn.pack(fill="x", pady=(0, 10))
@@ -268,6 +277,15 @@ class GameClientUI:
         ptype = pdu.get("type")
         if ptype == "GAME_STATE_UPDATE":
             self.state = pdu.get("state", {})
+            if self.state.get("phase") == "MULLIGAN" and self.mulligan_pending == "mulligan":
+                self.client.mulligan_count += 1
+                self.mulligan_pending = None
+                self.selected_hand.clear()
+                self._toast("New hand drawn", f"Select {self.client.mulligan_count} card(s) to put on the bottom.", GOLD)
+            elif self.state.get("phase") != "MULLIGAN":
+                self.mulligan_pending = None
+                self.mulligan_kept = False
+                self.selected_hand.clear()
             if hasattr(self, "board"): self._render()
         elif ptype == "PHASE_TRANSITION" and hasattr(self, "phase_label"):
             self.phase_label.configure(text=PHASE_LABELS.get(pdu.get("to_phase"), pdu.get("to_phase")))
@@ -276,6 +294,9 @@ class GameClientUI:
                 self.priority_text.configure(text="Your priority — choose an action", fg=GREEN)
                 self.pass_btn.state(["!disabled"])
         elif ptype == "ERROR":
+            self.mulligan_pending = None
+            self.mulligan_kept = False
+            if hasattr(self, "board"): self._render()
             self._toast(pdu.get("code", "Action rejected"), pdu.get("message", ""), RED)
         elif ptype == "GAME_OVER":
             messagebox.showinfo("Match complete", f"Winner: {pdu.get('winner_id')}\nReason: {pdu.get('reason')}")
@@ -288,8 +309,15 @@ class GameClientUI:
         life = state.get("life_totals", {})
         opponent = next((pid for pid in life if pid != me), self.client.opponent_id or "Opponent")
         self.client.opponent_id = opponent if opponent != "Opponent" else self.client.opponent_id
-        self.turn_label.configure(text=f"TURN {state.get('turn', '—')}  •  {state.get('active_player', 'Waiting')}")
         phase = state.get("phase", "LOBBY")
+        active = state.get("active_player")
+        is_my_turn = active == me
+        if phase not in ("LOBBY", "MULLIGAN") and active:
+            self.turn_label.configure(
+                text=f"{'YOUR TURN' if is_my_turn else str(active).upper() + '’S TURN'}  •  TURN {state.get('turn', '—')}",
+                fg=GREEN if is_my_turn else RED)
+        else:
+            self.turn_label.configure(text=f"TURN {state.get('turn', '—')}  •  {active or 'WAITING'}", fg=TEXT)
         self.phase_label.configure(text=PHASE_LABELS.get(phase, phase))
         counts, libs = state.get("hand_counts", {}), state.get("library_counts", {})
         graves = state.get("graveyard", {})
@@ -309,8 +337,40 @@ class GameClientUI:
         self.pass_btn.state(["!disabled"] if has_priority else ["disabled"])
         if phase == "MULLIGAN":
             self.mulligan_frame.pack(fill="x", before=self.pass_btn, pady=(0, 10))
+            required = self.client.mulligan_count
+            if self.mulligan_pending == "keep" or self.mulligan_kept:
+                banner = "HAND LOCKED IN — WAITING FOR OPPONENT"
+                banner_color = BLUE
+            elif self.mulligan_pending == "mulligan":
+                banner = "DRAWING A NEW HAND…"
+                banner_color = GOLD
+            elif required:
+                banner = f"SELECT {required} CARD{'S' if required != 1 else ''} TO BOTTOM  •  {len(self.selected_hand)}/{required} SELECTED"
+                banner_color = GOLD_BRIGHT
+            else:
+                banner = "OPENING HAND — KEEP OR TAKE A MULLIGAN"
+                banner_color = GOLD_BRIGHT
+            self.action_banner.configure(text=banner, bg="#2a2114", fg=banner_color)
+            waiting = self.mulligan_pending is not None or self.mulligan_kept
+            self.keep_btn.state(["disabled"] if waiting else ["!disabled"])
+            self.mulligan_btn.state(["disabled"] if waiting else ["!disabled"])
+            self.priority_text.configure(
+                text="Waiting for opponent to finish" if waiting else
+                     (f"Select {required} card(s), then keep" if required else "Choose your opening hand"),
+                fg=BLUE if waiting else GOLD_BRIGHT)
         else:
             self.mulligan_frame.pack_forget()
+            if phase == "DECLARE_ATTACKERS" and is_my_turn and not state.get("attackers_declared"):
+                text, color = "YOUR ACTION — DECLARE ATTACKERS", GOLD_BRIGHT
+            elif phase == "DECLARE_BLOCKERS" and not is_my_turn and not state.get("blockers_declared"):
+                text, color = "YOUR ACTION — DECLARE BLOCKERS", GOLD_BRIGHT
+            elif has_priority:
+                text, color = "YOUR PRIORITY — TAKE AN ACTION OR PASS", GREEN
+            elif is_my_turn:
+                text, color = "YOUR TURN — WAITING FOR PRIORITY", GREEN
+            else:
+                text, color = f"{str(active).upper() if active else 'OPPONENT'}’S TURN — WAITING", MUTED
+            self.action_banner.configure(text=text, bg="#13202b", fg=color)
 
     def _render_cards(self, zone, cards, selectable, field):
         for child in zone.cards.winfo_children(): child.destroy()
@@ -405,9 +465,27 @@ class GameClientUI:
         if len(self.selected_hand) != required:
             self._toast("Choose cards to bottom", f"Select exactly {required} card(s) before keeping.", GOLD)
             return
-        suffix = " " + " ".join(self.selected_hand) if self.selected_hand else ""
-        self._command("keep" + suffix)
-        self.selected_hand.clear()
+        self.client._send_pdu({
+            "type": "MULLIGAN_CHOICE",
+            "seq_num": self.client.server_seq_num,
+            "keep": True,
+            "cards_to_bottom": list(self.selected_hand),
+        })
+        self.mulligan_pending = "keep"
+        self.mulligan_kept = True
+        self._render()
+
+    def _take_mulligan(self):
+        if self.mulligan_pending or self.mulligan_kept:
+            return
+        self.client._send_pdu({
+            "type": "MULLIGAN_CHOICE",
+            "seq_num": self.client.server_seq_num,
+            "keep": False,
+            "cards_to_bottom": [],
+        })
+        self.mulligan_pending = "mulligan"
+        self._render()
 
     def _concede(self):
         if messagebox.askyesno("Concede match", "Concede this match and award the win to your opponent?"):

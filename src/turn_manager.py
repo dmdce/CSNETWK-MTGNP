@@ -74,6 +74,8 @@ class TurnManager:
         self.last_draw_failed = False
         self.state["pending_damage_orders"] = {}
         self.state["damage_orders"] = {}
+        self.state["attackers_declared"] = False
+        self.state["blockers_declared"] = False
 
     @property
     def active_player(self):
@@ -97,6 +99,8 @@ class TurnManager:
         self.state["declared_blockers"] = []
         self.state["pending_damage_orders"] = {}
         self.state["damage_orders"] = {}
+        self.state["attackers_declared"] = False
+        self.state["blockers_declared"] = False
 
         # Untap and clear creature combat flags across all battlefields
         for pid in self.player_ids:
@@ -220,12 +224,14 @@ class TurnManager:
             declared_attacker_ids.append(attacker_id)
 
         self.state["declared_attackers"] = valid_attackers
+        self.state["attackers_declared"] = True
 
         # Section 9.3: If no attackers declared, skip directly to END_OF_COMBAT
         if not declared_attacker_ids:
             self.state["phase"] = "END_OF_COMBAT"
         else:
-            self.state["phase"] = "DECLARE_BLOCKERS"
+            # The post-declaration priority window remains in this step.
+            self.state["phase"] = "DECLARE_ATTACKERS"
 
         self.state["priority_holder"] = self.active_player
         return declared_attacker_ids
@@ -284,6 +290,7 @@ class TurnManager:
             validated_blockers.append({"blocker_id": blocker_id, "attacker_id": attacker_id})
 
         self.state["declared_blockers"] = validated_blockers
+        self.state["blockers_declared"] = True
 
         # Group blockers by attacker to check for multiple blockers
         attacker_blockers = {}
@@ -296,11 +303,14 @@ class TurnManager:
 
         # Transition to ASSIGN_DAMAGE_ORDER if 2+ blockers block an attacker, otherwise COMBAT_DAMAGE
         if multiply_blocked:
-            self.state["phase"] = "ASSIGN_DAMAGE_ORDER"
+            next_phase = "ASSIGN_DAMAGE_ORDER"
             self.state["pending_damage_orders"] = multiply_blocked
             self.state["damage_orders"] = {}
         else:
-            self.check_and_advance_combat_damage_phase()
+            next_phase = self.check_and_advance_combat_damage_phase()
+
+        self.state["combat_after_blockers"] = next_phase
+        self.state["phase"] = "DECLARE_BLOCKERS"
 
         self.state["priority_holder"] = self.active_player
         return validated_blockers

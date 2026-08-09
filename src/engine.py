@@ -146,6 +146,10 @@ class GameEngine:
                 "stack": copy.deepcopy(self.state["stack"])
             }
 
+            for combat_flag in ("attackers_declared", "blockers_declared"):
+                if combat_flag in self.state:
+                    visible_state[combat_flag] = self.state[combat_flag]
+
             if "priority_holder" in self.state and self.state["priority_holder"] is not None:
                 visible_state["priority_holder"] = self.state["priority_holder"]
 
@@ -319,10 +323,10 @@ class GameEngine:
 
         self.state["phase"] = to_phase
         self.state["priority_holder"] = None
+        self.state["attackers_declared"] = False
 
         self.broadcast_phase_transition(from_phase, to_phase)
         self.send_personalized_state_update()
-        self.grant_priority(self.state["active_player"])
 
     def handle_declare_attackers_pdu(self, player_id, pdu):
         """
@@ -378,11 +382,10 @@ class GameEngine:
             self.server.send_error(player_id, e.code, e.message, pdu)
             return
 
+        if self.state["phase"] == "END_OF_COMBAT":
+            self.broadcast_phase_transition("DECLARE_ATTACKERS", "END_OF_COMBAT")
         self.send_personalized_state_update()
-
-        # Priority window opens after declaring attackers if combat moves forward
-        if self.state["phase"] == "DECLARE_BLOCKERS":
-            self.grant_priority(self.state["active_player"])
+        self.grant_priority(self.state["active_player"])
 
     def handle_declare_blockers_pdu(self, player_id, pdu):
         """
@@ -409,7 +412,19 @@ class GameEngine:
                                    f"Expected sequence number {self.last_phase_transition_seq}, but got {seq}.", pdu)
             return
 
-        blockers = pdu.get("blockers", [])
+        raw_blockers = pdu.get("blockers", [])
+        if not isinstance(raw_blockers, list):
+            self.server.send_error(player_id, "ILLEGAL_ACTION", "Blockers field must be a list.", pdu)
+            return
+        blockers = []
+        for entry in raw_blockers:
+            if not isinstance(entry, dict):
+                self.server.send_error(player_id, "ILLEGAL_ACTION", "Invalid blocker element format.", pdu)
+                return
+            blockers.append({
+                "blocker_id": entry.get("blocker_id", entry.get("creature_id")),
+                "attacker_id": entry.get("attacker_id", entry.get("blocking_id")),
+            })
 
         try:
             self.turn_manager.declare_blockers(player_id, blockers)
@@ -420,11 +435,8 @@ class GameEngine:
         # Broadcast updated state showing "blocking" relations while "tapped" remains False
         self.send_personalized_state_update()
 
-        # Check if phase advanced directly into combat damage
-        if self.state["phase"] in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
-            self.handle_combat_damage_phase()
-        else:
-            self.grant_priority(self.state["active_player"])
+        # The post-declaration priority window remains in DECLARE_BLOCKERS.
+        self.grant_priority(self.state["active_player"])
 
     def handle_assign_damage_order_pdu(self, player_id, pdu):
         """
@@ -576,46 +588,33 @@ class GameEngine:
         elif outcome == "DECLARE_ATTACKERS":
             self.transition_to_declare_attackers()
         else:
-            # Combat declarations are turn-based actions rather than entries
-            # in TurnManager.NEXT_STEP.  The UI still permits both players to
-            # pass at these prompts, so a completed pass pair means the
-            # relevant player chose an empty declaration.
-            if self.state.get("phase") == "DECLARE_ATTACKERS":
-                self._complete_empty_attack_declaration()
-            elif self.state.get("phase") == "DECLARE_BLOCKERS":
-                self._complete_empty_block_declaration()
+            if (self.state.get("phase") == "DECLARE_ATTACKERS"
+                    and self.state.get("attackers_declared")):
+                self._transition_to_declare_blockers()
+            elif (self.state.get("phase") == "DECLARE_BLOCKERS"
+                  and self.state.get("blockers_declared")):
+                self._advance_after_blockers()
             else:
                 self.advance_phase()
 
-    def _complete_empty_attack_declaration(self):
-        """Treat two priority passes at DECLARE_ATTACKERS as no attacks."""
-        from_phase = self.state["phase"]
-        try:
-            self.turn_manager.declare_attackers(self.state["active_player"], [])
-        except GameRuleError as error:
-            self.server.send_error(self.state["active_player"], error.code, error.message)
-            return
-        to_phase = self.state["phase"]
-        self.broadcast_phase_transition(from_phase, to_phase)
+    def _transition_to_declare_blockers(self):
+        """Close post-attack priority and request the defender's blocks."""
+        self.state["phase"] = "DECLARE_BLOCKERS"
+        self.state["priority_holder"] = None
+        self.state["blockers_declared"] = False
+        self.broadcast_phase_transition("DECLARE_ATTACKERS", "DECLARE_BLOCKERS")
         self.send_personalized_state_update()
-        self.grant_priority(self.state["active_player"])
 
-    def _complete_empty_block_declaration(self):
-        """Treat two priority passes at DECLARE_BLOCKERS as no blocks."""
-        from_phase = self.state["phase"]
-        defender = self.turn_manager.opponent(self.state["active_player"])
-        try:
-            self.turn_manager.declare_blockers(defender, [])
-        except GameRuleError as error:
-            self.server.send_error(defender, error.code, error.message)
-            return
-        to_phase = self.state["phase"]
-        self.broadcast_phase_transition(from_phase, to_phase)
+    def _advance_after_blockers(self):
+        """Close post-block priority and enter the computed combat step."""
+        to_phase = self.state.pop("combat_after_blockers", "COMBAT_DAMAGE")
+        self.state["phase"] = to_phase
+        self.state["priority_holder"] = None
+        self.broadcast_phase_transition("DECLARE_BLOCKERS", to_phase)
         if to_phase in ("FIRST_STRIKE_DAMAGE", "COMBAT_DAMAGE"):
             self.handle_combat_damage_phase()
         else:
             self.send_personalized_state_update()
-            self.grant_priority(self.state["active_player"])
 
     def handle_concede(self, player_id, pdu):
         """
