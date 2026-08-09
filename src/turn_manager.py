@@ -138,7 +138,7 @@ class TurnManager:
         new = NEXT_STEP[old]
         self.state["phase"] = new
         self.state["priority_holder"] = None
-        if new == "DRAW" and self.state["turn"] != 1:
+        if new == "DRAW":
             self.last_draw_failed = not self.draw_card(self.active_player)
         else:
             self.last_draw_failed = False
