@@ -11,6 +11,8 @@ import argparse
 from protocol import MAX_PDU_SIZE
 from console_logger import setup_logging, get_logger
 
+logger = get_logger(__name__)
+
 try:
     import openpyxl
 except ImportError:
@@ -55,7 +57,20 @@ class MTGNPClient:
                     "ponder_001", "ponder_002", "ponder_003", "ponder_004",
                     "prodigal_sorcerer_001", "prodigal_sorcerer_002"] # Temporary
         self.card_db = {}
+        self.current_state = {}
+        self.event_listener = None
         self._load_card_database()
+
+    def set_event_listener(self, listener):
+        """Register a thread-safe UI/event callback receiving ``(event, data)``."""
+        self.event_listener = listener
+
+    def _emit(self, event, data=None):
+        if self.event_listener:
+            try:
+                self.event_listener(event, data)
+            except Exception:
+                logger.exception("Client event listener failed")
 
     def _start_heartbeat(self):
         """
@@ -544,6 +559,7 @@ class MTGNPClient:
                 }
                 logger.debug(f"Sending PDU to server: {ready_pdu}")
                 self._send_pdu(ready_pdu)
+                self._emit("connected", {"host": self.host, "port": self.port})
                 return True
 
             except (socket.error, ConnectionRefusedError):
@@ -584,6 +600,7 @@ class MTGNPClient:
         """
 
         p_type = pdu.get("type")
+        self._emit("pdu", pdu)
 
         # Capture seq_num from server PDU (GAME_STATE_UPDATE, PRIORITY_GRANT, ...)
         if p_type in ("GAME_STATE_UPDATE", "PRIORITY_GRANT", "PHASE_TRANSITION"):
@@ -605,6 +622,7 @@ class MTGNPClient:
 
         elif p_type == "GAME_STATE_UPDATE":
             state = pdu.get("state", {})
+            self.current_state = state
             self.current_phase = state.get("phase")
             self.current_hand = state.get("hand", [])
 
