@@ -260,6 +260,7 @@ class MTGNPServer:
             if info.get('timer'):
                 info['timer'].cancel()
         self.players = {}
+        self.seq_num = 0
         self.phase = "LOBBY"
         self.engine.reset_state()
         self.broadcast_lobby_status()
