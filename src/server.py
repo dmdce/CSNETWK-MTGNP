@@ -16,6 +16,25 @@ PORT = 4444
 
 clear_log("server_stream.jsonl")
 
+# Known client-to-server PDU types
+CLIENT_TO_SERVER_TYPES = {
+    "PLAYER_READY",
+    "MULLIGAN_CHOICE",
+    "PRIORITY_PASS",
+    "CAST_SPELL",
+    "ACTIVATE_ABILITY",
+    "DECLARE_ATTACKERS",
+    "DECLARE_BLOCKERS",
+    "ASSIGN_DAMAGE_ORDER",
+    "PLAY_LAND",
+    "DISCARD",
+    "CONCEDE",
+    "TRIGGER_ORDER_RESPONSE",
+    "TRIGGER_CHOICE_RESPONSE",
+    "PING",
+}
+
+# MTG cards known by the system
 LEGAL_CARDS = {
     "lightning_bolt_001", "lightning_bolt_002", "lightning_bolt_003", "lightning_bolt_004",
     "shock_001", "shock_002", "shock_003", "shock_004",
@@ -300,6 +319,14 @@ class MTGNPServer:
 
                 p_type = pdu.get("type")
 
+                # Check for unknown "type" before other handling proceeds
+                if p_type is None or p_type not in CLIENT_TO_SERVER_TYPES:
+                    player_id = pid or self.get_player_id_by_socket(conn)
+                    self.send_error(player_id, "UNKNOWN_TYPE", f"Unrecognized PDU type: {p_type}",
+                                    pdu, pdu.get("seq_num"))
+                    continue
+
+                # Check if "type" is a PING
                 if p_type == "PING":
                     pong_pdu = {
                         "type": "PONG",

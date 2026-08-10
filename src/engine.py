@@ -214,6 +214,9 @@ class GameEngine:
                     self.handle_discard(player_id, pdu)
                 case "CONCEDE":
                     self.handle_concede(player_id, pdu)
+                case _:
+                    self.server.send_error(player_id, "UNKNOWN_TYPE", f"Unknown type in game phase: {pdu_type}",
+                                           pdu, pdu.get("seq_num"))
 
     def handle_mulligan(self, player_id, pdu):
         """
