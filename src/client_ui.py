@@ -9,7 +9,7 @@ import os
 import queue
 import threading
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 from client import HOST, PORT, MTGNPClient
 from console_logger import setup_logging
@@ -26,10 +26,13 @@ def card_id(card):
 
 
 class CardTile(tk.Frame):
-    def __init__(self, parent, card, info, command, selected=False, compact=False):
+    def __init__(self, parent, card, info, command, selected=False, compact=False,
+                 highlighted=False):
         color = str((info or {}).get("color", "C")).upper()[:1] or "C"
         fill, ink = CARD_COLORS.get(color, CARD_COLORS["C"])
-        super().__init__(parent, bg=GOLD_BRIGHT if selected else LINE, padx=2, pady=2,
+        border = GOLD_BRIGHT if selected else (GREEN if highlighted else LINE)
+        border_width = 3 if selected or highlighted else 2
+        super().__init__(parent, bg=border, padx=border_width, pady=border_width,
                          cursor="hand2")
         body = tk.Frame(self, bg=fill, width=116 if compact else 138,
                         height=76 if compact else 112)
@@ -69,6 +72,7 @@ class GameClientUI:
         self.events = queue.Queue()
         self.selected_hand = set()
         self.selected_field = set()
+        self.pending_blocker = None
         self.mulligan_pending = None
         self.mulligan_kept = False
         self.bg_photo = None
@@ -277,6 +281,8 @@ class GameClientUI:
         ptype = pdu.get("type")
         if ptype == "GAME_STATE_UPDATE":
             self.state = pdu.get("state", {})
+            if self.state.get("phase") != "DECLARE_BLOCKERS":
+                self.pending_blocker = None
             if self.state.get("phase") == "MULLIGAN" and self.mulligan_pending == "mulligan":
                 self.client.mulligan_count += 1
                 self.mulligan_pending = None
@@ -293,6 +299,8 @@ class GameClientUI:
                 "active_player": pdu.get("active_player", self.state.get("active_player")),
                 "turn": pdu.get("turn", self.state.get("turn")),
             })
+            if self.state.get("phase") != "DECLARE_BLOCKERS":
+                self.pending_blocker = None
             self._render()
         elif ptype == "PRIORITY_GRANT" and hasattr(self, "priority_text"):
             if pdu.get("player_id") == self.client.player_id:
@@ -301,6 +309,7 @@ class GameClientUI:
         elif ptype == "ERROR":
             self.mulligan_pending = None
             self.mulligan_kept = False
+            self.pending_blocker = None
             if hasattr(self, "board"): self._render()
             self._toast(pdu.get("code", "Action rejected"), pdu.get("message", ""), RED)
         elif ptype == "GAME_OVER":
@@ -331,11 +340,24 @@ class GameClientUI:
             bar.life.configure(text=f"{life.get(pid, 20)} LIFE")
             bar.meta.configure(text=f"Library {libs.get(pid, '—')}   Hand {counts.get(pid, len(state.get('hand', [])) if pid == me else '—')}   Grave {len(graves.get(pid, []))}")
         battlefield = state.get("battlefield", {})
-        self._render_cards(self.opp_field, battlefield.get(opponent, []), False, True)
-        self._render_cards(self.my_field, battlefield.get(me, []), True, True)
+        selected_spell = self._selected_spell()
+        choosing_attackers = (phase == "DECLARE_ATTACKERS" and is_my_turn
+                              and not state.get("attackers_declared"))
+        choosing_block_target = bool(self.pending_blocker and phase == "DECLARE_BLOCKERS")
+        self._highlight_player_bar(self.opponent_bar, bool(selected_spell or choosing_attackers))
+        self._highlight_player_bar(self.player_bar, bool(selected_spell))
+        self._render_cards(
+            self.opp_field, battlefield.get(opponent, []), choosing_block_target, True,
+            highlight_all=bool(selected_spell),
+            highlight_test=self._is_attacking if choosing_block_target else None,
+            selection_handler=self._choose_block_target if choosing_block_target else None)
+        self._render_cards(self.my_field, battlefield.get(me, []), True, True,
+                           highlight_all=bool(selected_spell),
+                           highlight_test=self._can_attack if choosing_attackers else None)
         self._render_cards(self.hand_zone, state.get("hand", []), True, False)
         stack = state.get("stack", [])
-        self._render_cards(self.stack_zone, [s.get("source_id", s) if isinstance(s, dict) else s for s in stack], False, True)
+        self._render_cards(self.stack_zone, [s.get("source_id", s) if isinstance(s, dict) else s for s in stack], False, True,
+                           highlight_all=bool(selected_spell))
         has_priority = state.get("priority_holder") == me or self.client.has_priority
         self.priority_text.configure(text="Your priority — choose an action" if has_priority else "Waiting for opponent",
                                      fg=GREEN if has_priority else MUTED)
@@ -377,7 +399,8 @@ class GameClientUI:
                 text, color = f"{str(active).upper() if active else 'OPPONENT'}’S TURN — WAITING", MUTED
             self.action_banner.configure(text=text, bg="#13202b", fg=color)
 
-    def _render_cards(self, zone, cards, selectable, field):
+    def _render_cards(self, zone, cards, selectable, field, highlight_all=False,
+                      highlight_test=None, selection_handler=None):
         for child in zone.cards.winfo_children(): child.destroy()
         if not cards:
             tk.Label(zone.cards, text="No cards", bg="#131a24", fg="#536174",
@@ -387,10 +410,44 @@ class GameClientUI:
         for card in cards[:10]:
             cid = card_id(card)
             info = self.client._get_card_info(cid)
+            highlighted = highlight_all or bool(highlight_test and highlight_test(card, info))
             tile = CardTile(zone.cards, card, info,
-                            lambda c, f=field, s=selectable: self._select(c, f, s),
-                            cid in selected, compact=field)
+                            lambda c, f=field, s=selectable, handler=selection_handler:
+                            handler(c) if handler else self._select(c, f, s),
+                            cid in selected, compact=field, highlighted=highlighted)
             tile.pack(side="left", padx=4, pady=2)
+
+    def _selected_spell(self):
+        if len(self.selected_hand) != 1 or self.state.get("phase") == "MULLIGAN":
+            return None
+        cid = next(iter(self.selected_hand))
+        info = self.client._get_card_info(cid) or {}
+        is_land = ("land" in str(info.get("card_type", "")).lower()
+                   or cid.startswith(("mountain", "island", "swamp", "forest", "plains")))
+        return None if is_land else cid
+
+    @staticmethod
+    def _can_attack(card, info):
+        if not isinstance(card, dict):
+            return False
+        is_creature = ("creature" in str((info or {}).get("card_type", "")).lower()
+                       or ("power" in card and "toughness" in card))
+        return (is_creature and not card.get("tapped")
+                and (not card.get("summoning_sick") or card.get("haste")))
+
+    def _is_attacking(self, card, _info=None):
+        cid = card_id(card)
+        declared = self.state.get("declared_attackers", [])
+        attacker_ids = {
+            item.get("creature_id") if isinstance(item, dict) else item
+            for item in declared
+        }
+        return bool((isinstance(card, dict) and card.get("attacking")) or cid in attacker_ids)
+
+    @staticmethod
+    def _highlight_player_bar(bar, highlighted):
+        bar.configure(highlightbackground=GREEN if highlighted else bar.cget("bg"),
+                      highlightthickness=3 if highlighted else 0)
 
     def _select(self, cid, field, selectable):
         self._inspect(cid)
@@ -452,11 +509,27 @@ class GameClientUI:
     def _block(self):
         if len(self.selected_field) != 1:
             self._toast("Select one blocker", "Choose one creature on your battlefield.", GOLD); return
-        attacker = simpledialog.askstring("Declare blocker", "Attacking creature ID:", parent=self.root)
-        if attacker: self._command(f"block {next(iter(self.selected_field))} {attacker}")
+        self.pending_blocker = next(iter(self.selected_field))
+        self._toast("Choose an attacker", "Select a highlighted creature on the opponent's battlefield.", GREEN)
+        self._render()
+
+    def _choose_block_target(self, attacker):
+        if not self.pending_blocker:
+            return
+        opponent = self.client.opponent_id
+        battlefield = self.state.get("battlefield", {}).get(opponent, [])
+        card = next((item for item in battlefield if card_id(item) == attacker), None)
+        if card is None or not self._is_attacking(card):
+            self._toast("Invalid target", "Choose a highlighted attacking creature.", RED)
+            return
+        self._command(f"block {self.pending_blocker} {attacker}")
+        self.pending_blocker = None
         self.selected_field.clear()
+        self._render()
 
     def _no_blocks(self):
+        self.pending_blocker = None
+        self.selected_field.clear()
         self.client._send_pdu({"type": "DECLARE_BLOCKERS", "seq_num": self.client.last_phase_transition_seq,
                                "blockers": []})
 
