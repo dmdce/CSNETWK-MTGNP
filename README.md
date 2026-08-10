@@ -10,16 +10,18 @@ The protocol and implementation follow the [MTGNP RFC v1.0](https://docs.google.
 
 ### Prerequisites
 - Python 3.8 or higher (no external libraries required)
-- All source files must be in the same directory:
-  - `server.py`
+- All source files must be in the same directory (src directory inside the package):
   - `client.py`
-  - `engine.py`
-  - `turn_manager.py`
-  - `protocol.py`
+  - `client_ui.py`
   - `console_logger.py`
+  - `engine.py`
   - `logger.py`
-
----
+  - `mtgnp_master_card_list.xlsx`
+  - `protocol.py`
+  - `server.py`
+  - `server_ui.py`
+  - `turn_manager.py`
+  - `ui_theme.py`
 
 ### Running the Server
 
@@ -30,13 +32,12 @@ pip install -r requirements.txt
 python src/server_ui.py --verbose
 ```
 
-The host console provides listener configuration, player connection health,
-live match telemetry, lobby reset controls, and an event stream.
+The host console provides listener configuration, player connection health, live match telemetry, lobby reset controls, and an event stream.
 
 #### Command-line server
 
 ```bash
-py server.py [--verbose]
+python src/server.py --verbose
 ```
 
 | Argument |	Description |
@@ -45,10 +46,8 @@ py server.py [--verbose]
 
 #### Example
 > ```bash
-> py server.py --verbose
+> python src/server.py --verbose
 > ```
-
----
 
 ### Running the Client
 
@@ -59,26 +58,25 @@ pip install -r requirements.txt
 python src/client_ui.py --verbose
 ```
 
-The graphical client uses the master card workbook for card names, mana costs,
-types, stats, colors, and effect text. Select cards directly on the table,
-inspect them in the right panel, and use the contextual action controls.
+The graphical client uses the master card workbook for card names, mana costs, types, stats, colors, and effect text. Select cards directly on the table, inspect them in the right panel, and use the contextual action controls.
 
 #### Command-line client
 
 ```bash
-py client.py [--verbose] [--name NAME]
+python src/client.py --verbose --name NAME
 ```
 
 | Argument |	Description |
 | - | - |
 | `--verbose`	(optional) | Enables detailed PDU logging on the client side. |
 | `--name`	(optional) | Sets the player's display ID (default: anonymous). Must be unique per lobby. |
+| `NAME` | The playe's display ID. Must be specified after inserting `--name`. |
 
 #### Example
 > ```bash
-> py client.py --name Alice --verbose
-> py client.py --name Bob
-> py client.py --verbose
+> python src/client.py --name Alice --verbose
+> python src/client.py --name Bob
+> python src/client.py --verbose
 > ```
 
 > [!NOTE]
@@ -107,14 +105,6 @@ The contribution matrix disclosed will formalize the contribution of each of the
 
 ---
 
-## C. Declaration of AI Usage
+## C. Deviations from the RFC
 
-* **AI Tools Used:** DeepSeek, Google Gemini
-* **Output Explanation:** 
-* **Extent of Use:**
-* **Contribution to Learning:**
-
----
-
-## D. Deviations from the RFC
-
+There were no limitations nor deviations from the MTGNP RFC specifications. However, additional features were made to enhance the output of the project, such as implementing card effects, a graphical interface, and viewing client-side card statistics and effects in the graphical interface and the CLI.
