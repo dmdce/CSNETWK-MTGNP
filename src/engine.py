@@ -14,9 +14,9 @@ CARD_EFFECTS = {
     "counterspell": {"kind": "COUNTER"},
     "goblin_guide": {"kind": "CREATURE", "power": 2, "toughness": 2, "haste": True},
     # TODO: Implement these ff. card effects
-    # "monastery_swiftspear": {},
-    # "phantasmal_bear": {},
-    # "prodigal_sorcerer": {},
+    "monastery_swiftspear": {"kind": "CREATURE", "power": 1, "toughness": 2, "haste": True},
+    "phantasmal_bear": {"kind": "CREATURE", "power": 2, "toughness": 2},
+    "prodigal_sorcerer": {"kind": "CREATURE", "power": 1, "toughness": 1},
     # "ponder": {}
 }
 
