@@ -435,10 +435,8 @@ class GameClientUI:
         if "land" in str(info.get("card_type", "")).lower() or cid.startswith(("mountain", "island", "swamp", "forest", "plains")):
             self._command(f"land {cid}")
         else:
-            targets = simpledialog.askstring("Spell targets", "Target IDs, separated by spaces. Leave blank if none:", parent=self.root)
-            if targets is None: return
             pdu = {"type": "CAST_SPELL", "seq_num": self.client.priority_seq_num,
-                   "card_id": cid, "targets": targets.split(), "mana_payment": self._mana_payment(cid)}
+                   "card_id": cid, "targets": [], "mana_payment": self._mana_payment(cid)}
             self.client._send_pdu(pdu)
         self.selected_hand.clear()
 
