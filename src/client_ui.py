@@ -344,8 +344,9 @@ class GameClientUI:
         choosing_attackers = (phase == "DECLARE_ATTACKERS" and is_my_turn
                               and not state.get("attackers_declared"))
         choosing_block_target = bool(self.pending_blocker and phase == "DECLARE_BLOCKERS")
-        self._highlight_player_bar(self.opponent_bar, bool(selected_spell or choosing_attackers))
-        self._highlight_player_bar(self.player_bar, bool(selected_spell))
+        self._configure_player_target(
+            self.opponent_bar, opponent, bool(selected_spell or choosing_attackers))
+        self._configure_player_target(self.player_bar, me, bool(selected_spell))
         self._render_cards(
             self.opp_field, battlefield.get(opponent, []), choosing_block_target, True,
             highlight_all=bool(selected_spell),
@@ -444,10 +445,32 @@ class GameClientUI:
         }
         return bool((isinstance(card, dict) and card.get("attacking")) or cid in attacker_ids)
 
-    @staticmethod
-    def _highlight_player_bar(bar, highlighted):
+    def _configure_player_target(self, bar, player_id, highlighted):
         bar.configure(highlightbackground=GREEN if highlighted else bar.cget("bg"),
                       highlightthickness=3 if highlighted else 0)
+        cursor = "hand2" if highlighted else ""
+        for widget in (bar, *bar.winfo_children()):
+            widget.configure(cursor=cursor)
+            widget.unbind("<Button-1>")
+            if highlighted:
+                widget.bind("<Button-1>", lambda _event, pid=player_id: self._target_player(pid))
+
+    def _target_player(self, player_id):
+        phase = self.state.get("phase")
+        if phase == "DECLARE_ATTACKERS" and player_id != self.client.player_id:
+            self._declare_attackers(player_id)
+            return
+        cid = self._selected_spell()
+        if cid:
+            self.client._send_pdu({
+                "type": "CAST_SPELL",
+                "seq_num": self.client.priority_seq_num,
+                "card_id": cid,
+                "targets": [player_id],
+                "mana_payment": self._mana_payment(cid),
+            })
+            self.selected_hand.clear()
+            self._render()
 
     def _select(self, cid, field, selectable):
         self._inspect(cid)
@@ -498,9 +521,19 @@ class GameClientUI:
         self.selected_hand.clear()
 
     def _attack(self):
+        self._declare_attackers(self.client.opponent_id)
+
+    def _declare_attackers(self, target):
         if not self.selected_field:
             self._toast("Select attackers", "Choose one or more creatures on your battlefield.", GOLD); return
-        self._command("attack " + " ".join(self.selected_field)); self.selected_field.clear()
+        attackers = [{"creature_id": cid, "target": target} for cid in self.selected_field]
+        self.client._send_pdu({
+            "type": "DECLARE_ATTACKERS",
+            "seq_num": self.client.last_phase_transition_seq,
+            "attackers": attackers,
+        })
+        self.selected_field.clear()
+        self._render()
 
     def _no_attack(self):
         self.client._send_pdu({"type": "DECLARE_ATTACKERS", "seq_num": self.client.last_phase_transition_seq,
